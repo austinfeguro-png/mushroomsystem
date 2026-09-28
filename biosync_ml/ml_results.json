@@ -1,0 +1,20 @@
+{
+  "best_model": "Decision Tree",
+  "results": {
+    "Decision Tree": {
+      "accuracy": 100.0,
+      "precision": 100.0,
+      "recall": 100.0
+    },
+    "Random Forest": {
+      "accuracy": 100.0,
+      "precision": 100.0,
+      "recall": 100.0
+    },
+    "KNN": {
+      "accuracy": 90.91,
+      "precision": 90.91,
+      "recall": 90.91
+    }
+  }
+}
