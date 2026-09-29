@@ -1,0 +1,32 @@
+# ── Python / ML artifacts ─────────────────────────────
+__pycache__/
+*.pyc
+.venv/
+venv/
+# Trained model binaries (regenerate with: python train_models.py)
+*.pkl
+*.joblib
+*.h5
+
+# ── Secrets / environment ─────────────────────────────
+.env
+.env.*
+
+# ── Logs ──────────────────────────────────────────────
+*.log
+logs/
+
+# ── Temp / scratch dirs ───────────────────────────────
+tmp/
+temp/
+.tmp/
+*.tmp
+
+# ── OS junk ───────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Editor / IDE ──────────────────────────────────────
+.vscode/
+.idea/
