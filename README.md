@@ -1,4 +1,4 @@
-# 🌱 Bio-Sync — Smart Greenhouse Monitoring & Automation
+# 🌱 Bio-Sync -MAIN — Smart Greenhouse Monitoring & Automation
 
 Bio-Sync is an IoT system that monitors temperature and humidity in a growing environment, automatically controls a ventilation fan and water pump, sends SMS alerts to staff, and visualizes everything on a live web dashboard — with a machine-learning service that classifies growing conditions.
 
@@ -84,13 +84,13 @@ python prediction_api.py   # keep running while the dashboard is open (port 5000
 
 ### 3. Arduino hardware
 
-| Component | Pin |
-|---|---|
-| DHT22 data | D2 |
-| Ventilation fan (relay) | D5 |
-| Water pump (relay) | D6 |
-| Alert indicator (LED/buzzer) | D7 |
-| ESP8266 TX/RX | D10/D11 (SoftwareSerial) |
+| Component                    | Pin                      |
+| ---------------------------- | ------------------------ |
+| DHT22 data                   | D2                       |
+| Ventilation fan (relay)      | D5                       |
+| Water pump (relay)           | D6                       |
+| Alert indicator (LED/buzzer) | D7                       |
+| ESP8266 TX/RX                | D10/D11 (SoftwareSerial) |
 
 Open `sketch_may16a/sketch_may16a.ino` and set your WiFi credentials and the server IP (the machine running XAMPP) before uploading.
 
@@ -98,12 +98,12 @@ Open `sketch_may16a/sketch_may16a.ino` and set your WiFi credentials and the ser
 
 Thresholds live in the `system_settings` database table and can be tuned from the dashboard:
 
-| Key | Default | Meaning |
-|---|---|---|
-| `max_temperature` | 30.0 °C | Above this → fan on, alert |
-| `min_humidity` | 85.0 % | Below this → pump on, alert |
-| `max_humidity` | 90.0 % | Above this → fan on, alert |
-| `temperature_unit` | C | Display unit |
+| Key                | Default | Meaning                     |
+| ------------------ | ------- | --------------------------- |
+| `max_temperature`  | 30.0 °C | Above this → fan on, alert  |
+| `min_humidity`     | 85.0 %  | Below this → pump on, alert |
+| `max_humidity`     | 90.0 %  | Above this → fan on, alert  |
+| `temperature_unit` | C       | Display unit                |
 
 - **SMS**: paste your Semaphore API key into `sendSMS()` in `dashboard.php` / `historicaldatapage.php`. All active users with a phone number on file receive alerts.
 - **Arduino overrides**: the firmware enforces the same thresholds locally, so safety automation continues even if the server is unreachable.
@@ -112,30 +112,30 @@ Thresholds live in the `system_settings` database table and can be tuned from th
 
 **PHP endpoints**
 
-| Endpoint | Method | Purpose |
-|---|---|---|
-| `api_update.php?temp=&hum=` | GET | Sensor ingest; returns `CMD:FAN=n,PUMP=n` |
-| `live_data.php` | GET | Live JSON feed (auth required) |
-| `*.php` AJAX actions | POST | `ajax_action=` handlers per page |
+| Endpoint                    | Method | Purpose                                   |
+| --------------------------- | ------ | ----------------------------------------- |
+| `api_update.php?temp=&hum=` | GET    | Sensor ingest; returns `CMD:FAN=n,PUMP=n` |
+| `live_data.php`             | GET    | Live JSON feed (auth required)            |
+| `*.php` AJAX actions        | POST   | `ajax_action=` handlers per page          |
 
 **Flask ML API**
 
-| Endpoint | Purpose |
-|---|---|
+| Endpoint                        | Purpose                |
+| ------------------------------- | ---------------------- |
 | `GET /predict?temp=27.6&hum=85` | Condition + confidence |
-| `GET /metrics` | Model comparison table |
-| `GET /health` | Service status |
+| `GET /metrics`                  | Model comparison table |
+| `GET /health`                   | Service status         |
 
 ## 📊 Database Schema
 
-| Table | Purpose |
-|---|---|
-| `devices` | Registered devices and their current state |
-| `sensor_logs` | Time-series of sensor readings |
-| `system_settings` | Thresholds and system configuration |
-| `system_controls` | Manual fan/pump control states |
-| `notifications` | In-app alerts |
-| `users` | Accounts, roles, contact numbers |
+| Table             | Purpose                                    |
+| ----------------- | ------------------------------------------ |
+| `devices`         | Registered devices and their current state |
+| `sensor_logs`     | Time-series of sensor readings             |
+| `system_settings` | Thresholds and system configuration        |
+| `system_controls` | Manual fan/pump control states             |
+| `notifications`   | In-app alerts                              |
+| `users`           | Accounts, roles, contact numbers           |
 
 ## ⚠️ Security Notes
 
