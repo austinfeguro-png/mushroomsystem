@@ -2,6 +2,12 @@
 // ==========================================================
 // BIO-SYNC HARDWARE API ENDPOINT  |  api_update.php
 // ==========================================================
+// Fixed: $cfg → $settings (Bug 1 & 2)
+// Fixed: Dead query removed in reminder check (Bug 3)
+// Fixed: $isAbnormal now includes $temperature < $MIN_TEMP (Bug 4)
+// Fixed: Low temp notification condition added (Bug 5)
+// Fixed: Input range validation added (Issue 2 / Medium)
+// ==========================================================
 header('Content-Type: text/plain');
 
 $dbHost = 'localhost';
@@ -34,40 +40,57 @@ if ($temperature === null || $humidity === null) {
     exit;
 }
 
+// FIX (Issue 2): Range validation — reject implausible sensor values
+if ($temperature < -10 || $temperature > 60) {
+    error_log("BioSync: Implausible temperature value rejected: $temperature");
+    echo "CMD:FAN=0,PUMP=0";
+    exit;
+}
+if ($humidity < 0 || $humidity > 100) {
+    error_log("BioSync: Implausible humidity value rejected: $humidity");
+    echo "CMD:FAN=0,PUMP=0";
+    exit;
+}
+
 // ----------------------------------------------------------
 // 2. READ THRESHOLDS FROM system_settings
 // ----------------------------------------------------------
 try {
-    $s    = $pdo->query("SELECT setting_key, setting_value FROM system_settings");
-    $cfg  = $s->fetchAll(PDO::FETCH_KEY_PAIR);
-} catch (PDOException $e) { $cfg = []; }
+    $s        = $pdo->query("SELECT setting_key, setting_value FROM system_settings");
+    // FIX (Bug 1): was $cfg — now correctly $settings
+    $settings = $s->fetchAll(PDO::FETCH_KEY_PAIR);
+} catch (PDOException $e) {
+    $settings = [];
+}
 
-$MAX_TEMP = isset($cfg['max_temperature']) ? (float)$cfg['max_temperature'] : 30.0;
-$MIN_HUM  = isset($cfg['min_humidity'])    ? (float)$cfg['min_humidity']    : 85.0;
-$MAX_HUM  = isset($cfg['max_humidity'])    ? (float)$cfg['max_humidity']    : 90.0;
+// Stage-aware thresholds
+$stage    = $settings['current_stage']          ?? 'colonization';
+$MIN_TEMP = (float)($settings["{$stage}_min_temp"] ?? 24.0);
+$MAX_TEMP = (float)($settings["{$stage}_max_temp"] ?? 28.0);
+$MIN_HUM  = (float)($settings["{$stage}_min_hum"]  ?? 70.0);
+$MAX_HUM  = (float)($settings["{$stage}_max_hum"]  ?? 85.0);
 
 // ----------------------------------------------------------
 // 3. LOG SENSOR READINGS TO sensor_logs
 // ----------------------------------------------------------
 try {
     $pdo->prepare("
-        INSERT INTO sensor_logs (device_id, recorded_value, recorded_at)
-        SELECT id, :val, NOW() FROM devices
+        INSERT INTO sensor_logs (device_id, recorded_value, recorded_at, stage)
+        SELECT id, :val, NOW(), :stage FROM devices
         WHERE device_name = 'Temperature Node 1' LIMIT 1
-    ")->execute(['val' => $temperature]);
+    ")->execute(['val' => $temperature, 'stage' => $stage]);
 
     $pdo->prepare("
-        INSERT INTO sensor_logs (device_id, recorded_value, recorded_at)
-        SELECT id, :val, NOW() FROM devices
+        INSERT INTO sensor_logs (device_id, recorded_value, recorded_at, stage)
+        SELECT id, :val, NOW(), :stage FROM devices
         WHERE device_name = 'Humidity Node 1' LIMIT 1
-    ")->execute(['val' => $humidity]);
+    ")->execute(['val' => $humidity, 'stage' => $stage]);
 } catch (PDOException $e) {
     error_log("BioSync log error: " . $e->getMessage());
 }
 
 // ----------------------------------------------------------
 // 4. UPDATE devices.current_state FOR TEMP & HUMIDITY
-//    This is what live_data.php reads for the dashboard
 // ----------------------------------------------------------
 try {
     $pdo->prepare("
@@ -86,7 +109,7 @@ try {
 // ----------------------------------------------------------
 // 5. THRESHOLD CHECK → UPDATE FAN & PUMP STATES
 // ----------------------------------------------------------
-$fanState  = ($temperature > $MAX_TEMP) ? 1 : 0;
+$fanState  = ($temperature > $MAX_TEMP || $temperature < $MIN_TEMP) ? 1 : 0;
 $pumpState = ($humidity < $MIN_HUM || $humidity > $MAX_HUM) ? 1 : 0;
 
 try {
@@ -105,66 +128,70 @@ try {
 
 // ----------------------------------------------------------
 // 6. INSERT NOTIFICATION IF THRESHOLD BREACHED
-//    Checks last notification time to avoid spam (5 min gap)
+//    FIX (Bug 4 & 5): Added $temperature < $MIN_TEMP checks
 // ----------------------------------------------------------
-$isAbnormal = ($temperature > $MAX_TEMP) || ($humidity < $MIN_HUM) || ($humidity > $MAX_HUM);
+$isAbnormal = ($temperature > $MAX_TEMP)
+           || ($temperature < $MIN_TEMP)
+           || ($humidity < $MIN_HUM)
+           || ($humidity > $MAX_HUM);
 
 if ($isAbnormal) {
     try {
-        // Check last notification time — only insert if 5+ mins since last
-        $lastStmt = $pdo->query("
+        $lastStmt  = $pdo->query("
             SELECT created_at FROM notifications
+            WHERE type != 'stage_reminder'
             ORDER BY created_at DESC LIMIT 1
         ");
-        $lastRow     = $lastStmt->fetch();
-        $lastTime    = $lastRow ? strtotime($lastRow['created_at']) : 0;
-        $cooldown    = 300; // 5 minutes
-        $canNotify   = (time() - $lastTime) >= $cooldown;
+        $lastRow   = $lastStmt->fetch();
+        $lastTime  = $lastRow ? strtotime($lastRow['created_at']) : 0;
+        $cooldown  = 300; // 5 minutes
+        $canNotify = (time() - $lastTime) >= $cooldown;
 
         if ($canNotify) {
             $conditions = [];
+
+            // FIX (Bug 5): Both high and low temp now generate messages
             if ($temperature > $MAX_TEMP)
-                $conditions[] = "Temperature is {$temperature}°C (Limit: {$MAX_TEMP}°C)";
+                $conditions[] = "Temperature is {$temperature}°C (Max: {$MAX_TEMP}°C). Fan activated.";
+            if ($temperature < $MIN_TEMP)
+                $conditions[] = "Temperature is {$temperature}°C (Below Min: {$MIN_TEMP}°C). Check heating.";
             if ($humidity < $MIN_HUM)
-                $conditions[] = "Humidity dropped below {$MIN_HUM}%. Water pump activated.";
+                $conditions[] = "Humidity is LOW: {$humidity}% (Min: {$MIN_HUM}%). Pump activated.";
             if ($humidity > $MAX_HUM)
-                $conditions[] = "Humidity exceeded {$MAX_HUM}%. Ventilation activated.";
+                $conditions[] = "Humidity is HIGH: {$humidity}% (Max: {$MAX_HUM}%). Ventilation activated.";
 
             $condStr = implode(' & ', $conditions);
 
-            // Determine notification type
-            $isTemp = $temperature > $MAX_TEMP;
-            $isHum  = $humidity < $MIN_HUM || $humidity > $MAX_HUM;
+            $isTemp = ($temperature > $MAX_TEMP || $temperature < $MIN_TEMP);
+            $isHum  = ($humidity < $MIN_HUM || $humidity > $MAX_HUM);
 
             if ($isTemp && $isHum) {
                 $title     = 'Critical Alert';
-                $type      = 'alert';
                 $iconClass = 'fa-triangle-exclamation';
                 $desc      = "Temperature and Humidity thresholds breached. Auto-systems activated.";
             } elseif ($isTemp) {
-                $title     = 'High Temperature';
-                $type      = 'alert';
-                $iconClass = 'fa-temperature-high';
-                $desc      = "Temperature exceeded limit. Ventilation fan activated.";
+                $title     = $temperature > $MAX_TEMP ? 'High Temperature' : 'Low Temperature';
+                $iconClass = 'fa-temperature-half';
+                $desc      = $temperature > $MAX_TEMP
+                    ? "Temperature exceeded max limit. Ventilation fan activated."
+                    : "Temperature dropped below min limit. Please check the grow room.";
             } else {
                 $title     = $humidity < $MIN_HUM ? 'Low Humidity' : 'High Humidity';
-                $type      = 'alert';
                 $iconClass = 'fa-droplet';
                 $desc      = $humidity < $MIN_HUM
-                    ? "Humidity dropped below {$MIN_HUM}%. Water pump activated."
-                    : "Humidity exceeded {$MAX_HUM}%. Ventilation activated.";
+                    ? "Humidity dropped below minimum. Water pump activated."
+                    : "Humidity exceeded maximum. Ventilation activated.";
             }
 
             $pdo->prepare("
                 INSERT INTO notifications
                     (title, description, message, type, icon_class, is_read, created_at)
                 VALUES
-                    (:title, :desc, :msg, :type, :icon, 0, NOW())
+                    (:title, :desc, :msg, 'alert', :icon, 0, NOW())
             ")->execute([
                 'title' => $title,
                 'desc'  => $desc,
                 'msg'   => $condStr,
-                'type'  => $type,
                 'icon'  => $iconClass,
             ]);
         }
@@ -174,6 +201,62 @@ if ($isAbnormal) {
 }
 
 // ----------------------------------------------------------
-// 7. RESPOND TO ESP8266 / BROWSER
+// 7. STAGE DURATION REMINDER CHECK
+//    FIX (Bug 2): $settings now properly defined (Bug 1 fix)
+//    FIX (Bug 3): Removed dead first query — only one clean query
+// ----------------------------------------------------------
+try {
+    $currentStage   = $settings['current_stage']      ?? 'colonization';
+    $stageStartedAt = $settings['stage_started_at']   ?? '';
+    $expectedDays   = (int)($settings['stage_expected_days'] ?? 14);
+
+    if (!empty($stageStartedAt) && $expectedDays > 0) {
+        $daysPassed = (int)floor((time() - strtotime($stageStartedAt)) / 86400);
+
+        if ($daysPassed >= $expectedDays) {
+            $stageLabelMap = [
+                'colonization' => 'Colonization',
+                'pinning'      => 'Pinning Initiation',
+                'fruiting'     => 'Fruiting',
+            ];
+            $stageLabel = $stageLabelMap[$currentStage] ?? ucfirst($currentStage);
+
+            // FIX (Bug 3): Single clean query — no dead first query
+            $checkStmt = $pdo->prepare("
+                SELECT COUNT(*) FROM notifications
+                WHERE type = 'stage_reminder'
+                AND is_read = 0
+                AND created_at >= :since
+            ");
+            $checkStmt->execute(['since' => $stageStartedAt]);
+            $alreadySent = (int)$checkStmt->fetchColumn();
+
+            if ($alreadySent === 0) {
+                $nextStageMap = [
+                    'colonization' => 'Pinning Initiation',
+                    'pinning'      => 'Fruiting',
+                    'fruiting'     => 'Harvest / Cycle Complete',
+                ];
+                $nextStage = $nextStageMap[$currentStage] ?? 'Next Stage';
+
+                $pdo->prepare("
+                    INSERT INTO notifications
+                        (title, description, message, type, icon_class, is_read, created_at)
+                    VALUES
+                        (:title, :desc, :msg, 'stage_reminder', 'fa-seedling', 0, NOW())
+                ")->execute([
+                    'title' => 'Stage Check Required',
+                    'desc'  => "{$stageLabel} has reached its expected {$expectedDays}-day duration. Please inspect the substrate bags.",
+                    'msg'   => "Advance from {$stageLabel} to {$nextStage}?",
+                ]);
+            }
+        }
+    }
+} catch (PDOException $e) {
+    error_log("BioSync stage reminder error: " . $e->getMessage());
+}
+
+// ----------------------------------------------------------
+// 8. RESPOND TO ESP8266 / BROWSER
 // ----------------------------------------------------------
 echo "CMD:FAN={$fanState},PUMP={$pumpState}";

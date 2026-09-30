@@ -4,18 +4,21 @@
 // Included by dashboard.php — uses $temperature and $humidity
 // already set by dashboard.php
 // =============================================================
-// Accept temp/hum from GET (AJAX fetch) or from dashboard PHP variables
-$ml_temp = isset($_GET['temp'])  ? (float)$_GET['temp']  :
-          (isset($temperature)   ? (float)$temperature    : 0.0);
-$ml_hum  = isset($_GET['hum'])   ? (float)$_GET['hum']   :
-          (isset($humidity)      ? (float)$humidity       : 0.0);
+// Accept params from GET (AJAX) or dashboard PHP variables
+$ml_temp  = isset($_GET['temp'])  ? (float)$_GET['temp']  : (isset($temperature) ? (float)$temperature : 0.0);
+$ml_hum   = isset($_GET['hum'])   ? (float)$_GET['hum']   : (isset($humidity)    ? (float)$humidity    : 0.0);
+$ml_algo  = isset($_GET['algo'])  ? $_GET['algo']          : ($settings['active_ml_algorithm'] ?? 'Random Forest');
+$ml_stage = isset($_GET['stage']) ? $_GET['stage']         : ($settings['current_stage']        ?? 'fruiting');
+
+$stageLabelMap = ['colonization'=>'Colonization','pinning'=>'Pinning Initiation','fruiting'=>'Fruiting'];
+$ml_stage_label = $stageLabelMap[$ml_stage] ?? ucfirst($ml_stage);
 
 $predData    = null;
 $metricsData = null;
 $ml_error    = null;
 
 $ctx = stream_context_create(['http' => ['timeout' => 2]]);
-$predRaw    = @file_get_contents("http://127.0.0.1:5000/predict?temp={$ml_temp}&hum={$ml_hum}", false, $ctx);
+$predRaw    = @file_get_contents("http://127.0.0.1:5000/predict?temp={$ml_temp}&hum={$ml_hum}&algo=" . urlencode($ml_algo) . "&stage=" . urlencode($ml_stage), false, $ctx);
 $metricsRaw = @file_get_contents("http://127.0.0.1:5000/metrics", false, $ctx);
 
 if ($predRaw === false || $metricsRaw === false) {
@@ -87,7 +90,10 @@ body.dark .ml-offline { background: #1c1700; color: #fde68a; border-color: #854d
         <i class="fa-solid fa-brain" style="color:var(--primary);margin-right:6px;"></i>
         ML Condition Prediction
     </h3>
-    <span style="font-size:11px;color:var(--text-muted);">Active Model: <?= htmlspecialchars($bestModel) ?></span>
+    <div style="text-align:right;">
+        <div style="font-size:11px;color:var(--text-muted);">Algorithm: <strong><?= htmlspecialchars($ml_algo) ?></strong></div>
+        <div style="font-size:11px;color:var(--text-muted);">Stage: <strong><?= htmlspecialchars($ml_stage_label) ?></strong></div>
+    </div>
 </div>
 
 <?php if ($ml_error): ?>

@@ -35,16 +35,6 @@ try {
 }
 
 // ==========================================
-// 3a. HANDLE GET JSON REQUEST (live poll)
-// ==========================================
-if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['ajax']) && $_GET['ajax'] === 'notifications') {
-    header('Content-Type: application/json');
-    $rows = $pdo->query("SELECT * FROM notifications ORDER BY created_at DESC")->fetchAll(PDO::FETCH_ASSOC);
-    echo json_encode(['success' => true, 'notifications' => $rows]);
-    exit();
-}
-
-// ==========================================
 // 3. HANDLE AJAX POST REQUESTS
 // ==========================================
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax_action'])) {
@@ -1216,40 +1206,6 @@ recountAll();
 applyFilters();
 
 // ── Silent live update every 5 seconds ────────────
-let knownIds = new Set([...document.querySelectorAll('.notif-item[data-id]')].map(el => el.dataset.id));
-
-function buildNotifHTML(n) {
-    const type      = n.type || 'system';
-    const isUnread  = n.is_read == 0;
-    const iconMap   = { alert: 'icon-alert', info: 'icon-info', warning: 'icon-warning' };
-    const badgeMap  = { alert: 'badge-alert', info: 'badge-info', warning: 'badge-warning' };
-    const iconClass = iconMap[type] || 'icon-system';
-    const badgeClass= badgeMap[type] || 'badge-system';
-    const faIcon    = n.icon_class || 'fa-bell';
-    const timeStr   = new Date(n.created_at).toLocaleDateString('en-US', {month:'short',day:'numeric'}) + ', ' +
-                      new Date(n.created_at).toLocaleTimeString('en-US', {hour:'numeric',minute:'2-digit'});
-    const itemClass = 'notif-item type-' + type + (isUnread ? ' unread' : '');
-    const adminBtns = <?php echo $isAdmin ? 'true' : 'false'; ?>;
-    return `<div class="${itemClass}" data-id="${n.id}" data-type="${type}" data-read="${isUnread ? '0' : '1'}">
-        <div class="notif-icon ${iconClass}"><i class="fa-solid ${faIcon}"></i></div>
-        <div class="notif-body">
-            <div class="notif-header">
-                <div style="display:flex;align-items:center;gap:8px;">
-                    ${isUnread ? '<div class="unread-dot"></div>' : ''}
-                    <span class="notif-title">${n.title}</span>
-                    <span class="type-badge ${badgeClass}">${type}</span>
-                </div>
-                <div class="notif-meta"><span class="notif-time">${timeStr}</span></div>
-            </div>
-            <div class="notif-desc">${n.description}</div>
-            <div class="notif-actions">
-                ${isUnread ? '<button class="btn-sm resolve js-mark-read"><i class="fa-solid fa-check"></i> Mark resolved</button>' : ''}
-                ${adminBtns ? '<button class="btn-sm dismiss js-delete"><i class="fa-solid fa-xmark"></i> Dismiss</button>' : ''}
-            </div>
-        </div>
-    </div>`;
-}
-
 function updateNotifPage() {
     // 1. Refresh alert banner via live_data.php
     fetch('live_data.php')
@@ -1280,27 +1236,16 @@ function updateNotifPage() {
         })
         .catch(() => {});
 
-    // 2. Fetch notifications as JSON — only inject genuinely new items
-    fetch('notificationspage.php?ajax=notifications')
-        .then(r => r.json())
-        .then(data => {
-            if (!data.success) return;
-            const list = document.getElementById('notifList');
-            const empty = document.getElementById('emptyState');
-            let added = false;
-
-            data.notifications.forEach(n => {
-                const sid = String(n.id);
-                if (!knownIds.has(sid)) {
-                    knownIds.add(sid);
-                    const html = buildNotifHTML(n);
-                    // Insert after emptyState (at top of real items)
-                    empty.insertAdjacentHTML('afterend', html);
-                    added = true;
-                }
-            });
-
-            if (added) {
+    // 2. Refresh notification list silently
+    fetch('notificationspage.php')
+        .then(r => r.text())
+        .then(html => {
+            const parser  = new DOMParser();
+            const doc     = parser.parseFromString(html, 'text/html');
+            const newList = doc.getElementById('notifList');
+            const curList = document.getElementById('notifList');
+            if (newList && curList) {
+                curList.innerHTML = newList.innerHTML;
                 recountAll();
                 applyFilters();
             }

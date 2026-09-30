@@ -167,7 +167,7 @@ if (!$user) { header('Location: logout.php'); exit(); }
         .sidebar-footer { margin-top: auto; padding-top: 16px; border-top: 1px solid var(--border); }
 
         /* ── Main ── */
-        .main-content { padding: 24px; flex: 1; min-width: 0; }
+        .main-content { margin-left: var(--sidebar-w); flex: 1; padding: 32px; max-width: 800px; }
 
         /* ── Page header ── */
         .page-head { margin-bottom: 28px; }
@@ -200,7 +200,7 @@ if (!$user) { header('Location: logout.php'); exit(); }
         .form-group { display: flex; flex-direction: column; gap: 6px; }
         .form-group.full { grid-column: 1 / -1; }
         label { font-size: 13px; font-weight: 500; color: var(--text-muted); }
-        input { width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px;
+        input { padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px;
                 background: var(--bg-body); color: var(--text-main); font-size: 14px;
                 transition: border .15s; outline: none; }
         input:focus { border-color: var(--primary); }
@@ -256,7 +256,7 @@ if (!$user) { header('Location: logout.php'); exit(); }
         .sidebar-backdrop.show { display: block; }
 
         /* ── Main wrapper ── */
-        .main { margin-left: var(--sidebar-w); flex: 1; display: flex; flex-direction: column; min-height: 100vh; width: calc(100% - var(--sidebar-w)); }
+        .main { margin-left: var(--sidebar-w); flex: 1; display: flex; flex-direction: column; min-height: 100vh; }
 
         /* ── Dark mode inputs ── */
         body.dark input { background: var(--bg-body); color: var(--text-main); border-color: var(--border); }
@@ -266,20 +266,19 @@ if (!$user) { header('Location: logout.php'); exit(); }
             :root { --sidebar-w: 0px; }
             .sidebar { transform: translateX(-260px); width: 260px; transition: transform .25s; }
             .sidebar.open { transform: translateX(0); }
-            .main { margin-left: 0; width: 100%; }
+            .main { margin-left: 0; }
             .hamburger { display: flex; }
-            .main-content { padding: 16px; }
-            .topbar { padding: 0 16px; }
         }
         @media (max-width: 640px) {
             .form-row { grid-template-columns: 1fr; }
+            .main-content { padding: 20px; }
             .user-chip-name, .user-chip-role { display: none; }
             .user-chip { padding: 3px; }
         }
     </style>
 </head>
 <body>
-<div style="display:flex; min-height:100vh; width:100%;">
+<div style="display:flex;min-height:100vh;">
 
 <!-- ================================================
      SIDEBAR

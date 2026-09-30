@@ -227,16 +227,8 @@ $EMAIL_NOTIF = $settings['email_notifications'] ?? '1';
             .topbar{padding:0 16px;}
             .form-row{grid-template-columns:1fr;}
             .search-wrap{width:100%;}
-            .table-toolbar{flex-direction:column;align-items:flex-start;}
-            .data-table thead th,
-            .data-table tbody td{padding:10px 8px;font-size:12px;}
-            .action-btns{flex-wrap:wrap;}
         }
         @media(max-width:640px){.user-chip-name,.user-chip-role{display:none;}.user-chip{padding:3px;}}
-        @media(max-width:420px){
-            .data-table .hide-mobile{display:none;}
-            .modal{margin:0 8px;}
-        }
     </style>
 </head>
 <body>
@@ -257,7 +249,7 @@ $EMAIL_NOTIF = $settings['email_notifications'] ?? '1';
         <div class="sidebar-footer">
             <a href="profile.php" class="nav-link"><i class="fa-solid fa-circle-user"></i> My Profile</a>
             <a href="#" class="nav-link" id="settingsLink"><i class="fa-solid fa-gear"></i> Settings</a>
-            <a href="login.php" class="nav-link logout" onclick="confirmLogout(event)"><i class="fa-solid fa-arrow-right-from-bracket"></i> Log Out</a>
+            <a href="logout.php" class="nav-link logout" onclick="confirmLogout(event)"><i class="fa-solid fa-arrow-right-from-bracket"></i> Log Out</a>
         </div>
     </aside>
     <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
@@ -297,10 +289,10 @@ $EMAIL_NOTIF = $settings['email_notifications'] ?? '1';
                     <table class="data-table">
                         <thead>
                             <tr>
-                                <th style="width:52px" class="hide-mobile">Avatar</th>
+                                <th style="width:52px">Avatar</th>
                                 <th>Full Name</th>
                                 <th>Username</th>
-                                <th class="hide-mobile">Phone</th>
+                                <th>Phone</th>
                                 <th>Role</th>
                                 <th>Status</th>
                                 <th style="text-align:right">Actions</th>
@@ -309,10 +301,10 @@ $EMAIL_NOTIF = $settings['email_notifications'] ?? '1';
                         <tbody id="userTableBody">
                             <?php foreach($users as $u): ?>
                             <tr>
-                                <td class="hide-mobile"><img src="https://ui-avatars.com/api/?name=<?php echo urlencode($u['full_name']); ?>&background=random" class="table-avatar"></td>
+                                <td><img src="https://ui-avatars.com/api/?name=<?php echo urlencode($u['full_name']); ?>&background=random" class="table-avatar"></td>
                                 <td style="font-weight:600"><?php echo htmlspecialchars($u['full_name']); ?></td>
                                 <td><?php echo htmlspecialchars($u['username']); ?></td>
-                                <td class="hide-mobile" style="color:var(--text-muted)"><?php echo htmlspecialchars($u['phone']??'—'); ?></td>
+                                <td style="color:var(--text-muted)"><?php echo htmlspecialchars($u['phone']??'—'); ?></td>
                                 <td style="text-transform:capitalize"><?php echo htmlspecialchars($u['role']); ?></td>
                                 <td>
                                     <?php if(strtolower($u['status'])==='active'): ?>
@@ -554,7 +546,7 @@ function filterUsers() {
     });
 }
 
-function confirmLogout(e) { e.preventDefault(); if (confirm('Are you sure you want to log out?')) location.href = 'login.php'; }
+function confirmLogout(e) { e.preventDefault(); if (confirm('Are you sure you want to log out?')) location.href = 'logout.php'; }
 </script>
 </body>
 </html>

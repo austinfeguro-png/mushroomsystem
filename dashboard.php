@@ -79,12 +79,85 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax_action'])) {
 
     if ($_POST['ajax_action'] === 'save_settings') {
         if (!$isAdmin) { echo json_encode(['success'=>false,'error'=>'Unauthorized']); exit; }
+
         $tempUnit   = in_array($_POST['temp_unit'] ?? '', ['C','F']) ? $_POST['temp_unit'] : 'C';
         $emailNotif = intval($_POST['email_notif'] ?? 0) === 1 ? '1' : '0';
-        $stmt = $pdo->prepare("UPDATE system_settings SET setting_value = :val WHERE setting_key = :key");
-        $stmt->execute(['val' => $tempUnit,   'key' => 'temperature_unit']);
-        $stmt->execute(['val' => $emailNotif, 'key' => 'email_notifications']);
-        echo json_encode(['success' => true]);
+        $newStage   = in_array($_POST['growth_stage'] ?? '', ['colonization','pinning','fruiting'])
+                      ? $_POST['growth_stage'] : 'fruiting';
+        $newAlgo    = in_array($_POST['ml_algorithm'] ?? '', ['Decision Tree','Random Forest','KNN'])
+                      ? $_POST['ml_algorithm'] : 'Random Forest';
+
+        // Load current stage to detect if it changed
+        $curStageStmt = $pdo->query("SELECT setting_value FROM system_settings WHERE setting_key='current_stage'");
+        $curStage     = $curStageStmt->fetchColumn();
+
+        $stmt = $pdo->prepare("INSERT INTO system_settings (setting_key, setting_value)
+            VALUES (:key, :val)
+            ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)");
+        $stmt->execute(['key' => 'temperature_unit',    'val' => $tempUnit]);
+        $stmt->execute(['key' => 'email_notifications', 'val' => $emailNotif]);
+        $stmt->execute(['key' => 'active_ml_algorithm', 'val' => $newAlgo]);
+        $stmt->execute(['key' => 'current_stage',       'val' => $newStage]);
+
+        // If stage changed, reset timer and log notification
+        if ($curStage !== $newStage) {
+            $stageLabelMap = ['colonization'=>'Colonization','pinning'=>'Pinning Initiation','fruiting'=>'Fruiting'];
+            $defaultDaysMap= ['colonization'=>14,'pinning'=>7,'fruiting'=>5];
+            $stageLabel    = $stageLabelMap[$newStage] ?? ucfirst($newStage);
+            $defaultDays   = $defaultDaysMap[$newStage] ?? 14;
+
+            $stmt->execute(['key' => 'stage_started_at',   'val' => date('Y-m-d H:i:s')]);
+            $stmt->execute(['key' => 'stage_expected_days','val' => $defaultDays]);
+
+            // Log transition notification
+            $userName = $_SESSION['user_name'] ?? 'Admin';
+            $stageThresholds = [
+                'colonization' => '24–28°C | 70–85% RH',
+                'pinning'      => '18–24°C | 85–95% RH',
+                'fruiting'     => '24–28°C | 80–95% RH',
+            ];
+            $thresh = $stageThresholds[$newStage] ?? '';
+            $pdo->prepare("INSERT INTO notifications (title, description, message, type, icon_class, is_read, created_at)
+                VALUES (:title, :desc, :msg, 'info', 'fa-seedling', 0, NOW())")
+            ->execute([
+                'title' => 'Stage Advanced',
+                'desc'  => "{$userName} confirmed stage transition to {$stageLabel}. New thresholds: {$thresh}.",
+                'msg'   => "System has advanced to {$stageLabel} stage.",
+            ]);
+        }
+
+        echo json_encode(['success' => true, 'stageChanged' => ($curStage !== $newStage), 'newStage' => $newStage]);
+        exit();
+    }
+
+    // Handle stage extension
+    if ($_POST['ajax_action'] === 'extend_stage') {
+        if (!$isAdmin) { echo json_encode(['success'=>false,'error'=>'Unauthorized']); exit; }
+        $extendDays = max(1, intval($_POST['extend_days'] ?? 3));
+        $stageLabelMap = ['colonization'=>'Colonization','pinning'=>'Pinning Initiation','fruiting'=>'Fruiting'];
+        $curStageStmt  = $pdo->query("SELECT setting_value FROM system_settings WHERE setting_key='current_stage'");
+        $curStage      = $curStageStmt->fetchColumn();
+        $stageLabel    = $stageLabelMap[$curStage] ?? ucfirst($curStage);
+
+        $stmt = $pdo->prepare("INSERT INTO system_settings (setting_key, setting_value)
+            VALUES (:key, :val) ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)");
+        $stmt->execute(['key' => 'stage_started_at',    'val' => date('Y-m-d H:i:s')]);
+        $stmt->execute(['key' => 'stage_expected_days', 'val' => $extendDays]);
+
+        // Mark existing reminder as read
+        $pdo->query("UPDATE notifications SET is_read=1 WHERE type='stage_reminder'");
+
+        // Log extension
+        $userName = $_SESSION['user_name'] ?? 'Admin';
+        $pdo->prepare("INSERT INTO notifications (title, description, message, type, icon_class, is_read, created_at)
+            VALUES (:title, :desc, :msg, 'info', 'fa-clock', 0, NOW())")
+        ->execute([
+            'title' => 'Stage Extended',
+            'desc'  => "{$userName} extended {$stageLabel} by {$extendDays} days. Next check scheduled in {$extendDays} days.",
+            'msg'   => "{$stageLabel} extended by {$extendDays} days.",
+        ]);
+
+        echo json_encode(['success' => true, 'extendDays' => $extendDays]);
         exit();
     }
 }
@@ -107,10 +180,43 @@ $settingsStmt = $pdo->query("SELECT setting_key, setting_value FROM system_setti
 $settings     = $settingsStmt->fetchAll(PDO::FETCH_KEY_PAIR);
 $EMAIL_NOTIF  = isset($settings['email_notifications']) ? $settings['email_notifications'] : '1';
 
-$MIN_HUM   = isset($settings['min_humidity'])    ? (float)$settings['min_humidity']    : 85.0;
-$MAX_HUM   = isset($settings['max_humidity'])    ? (float)$settings['max_humidity']    : 95.0;
-$MAX_TEMP  = isset($settings['max_temperature']) ? (float)$settings['max_temperature'] : 30.0;
-$TEMP_UNIT = isset($settings['temperature_unit'])? $settings['temperature_unit']       : 'C';
+// Stage-aware thresholds
+$stage    = $settings['current_stage']       ?? 'fruiting';
+$MIN_TEMP = (float)($settings["{$stage}_min_temp"] ?? 24.0);
+$MAX_TEMP = (float)($settings["{$stage}_max_temp"] ?? 28.0);
+$MIN_HUM  = (float)($settings["{$stage}_min_hum"]  ?? 80.0);
+$MAX_HUM  = (float)($settings["{$stage}_max_hum"]  ?? 95.0);
+$TEMP_UNIT= $settings['temperature_unit'] ?? 'C';
+$EMAIL_NOTIF = $settings['email_notifications'] ?? '1';
+$activeAlgo  = $settings['active_ml_algorithm'] ?? 'Random Forest';
+
+$stageLabelMap = [
+    'colonization' => 'Colonization',
+    'pinning'      => 'Pinning Initiation',
+    'fruiting'     => 'Fruiting',
+];
+$stageIconMap = [
+    'colonization' => 'fa-seedling',
+    'pinning'      => 'fa-circle-dot',
+    'fruiting'     => 'fa-leaf',
+];
+$stageColorMap = [
+    'colonization' => '#16a34a',
+    'pinning'      => '#2563eb',
+    'fruiting'     => '#d97706',
+];
+$stageLabel = $stageLabelMap[$stage] ?? ucfirst($stage);
+$stageIcon  = $stageIconMap[$stage]  ?? 'fa-leaf';
+$stageColor = $stageColorMap[$stage] ?? '#16a34a';
+
+$stageStartedAt = $settings['stage_started_at']  ?? '';
+$expectedDays   = (int)($settings['stage_expected_days'] ?? 14);
+$daysPassed     = (!empty($stageStartedAt)) ? (int)floor((time() - strtotime($stageStartedAt)) / 86400) : 0;
+
+// Check pending stage reminder
+$reminderStmt = $pdo->prepare("SELECT COUNT(*) FROM notifications WHERE type='stage_reminder' AND is_read=0");
+$reminderStmt->execute();
+$pendingReminder = (int)$reminderStmt->fetchColumn() > 0;
 
 // Latest sensor values
 $tempStmt    = $pdo->query("SELECT recorded_value FROM sensor_logs WHERE device_id = (SELECT id FROM devices WHERE device_name = 'Temperature Node 1' LIMIT 1) ORDER BY recorded_at DESC LIMIT 1");
@@ -870,6 +976,36 @@ if ($alertTriggered) {
         }
 
         /* =====================================================
+           STAGE INDICATOR
+        ===================================================== */
+        .stage-indicator {
+            display: flex; align-items: center; gap: 16px;
+            padding: 16px 20px; margin-bottom: 20px;
+            border-radius: var(--radius);
+            border: 1px solid var(--border);
+            background: var(--bg-card);
+            box-shadow: var(--shadow-sm);
+        }
+        .stage-icon-wrap {
+            width: 48px; height: 48px; border-radius: 12px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 20px; flex-shrink: 0;
+        }
+        .stage-name-label { font-size: 11px; font-weight: 600; color: var(--text-muted);
+                            text-transform: uppercase; letter-spacing: .5px; margin-bottom: 2px; }
+        .stage-name-value { font-size: 17px; font-weight: 700; }
+        .stage-thresh     { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+        .stage-progress   { margin-left: auto; text-align: right; }
+        .stage-days-label { font-size: 11px; color: var(--text-muted); margin-bottom: 4px; }
+        .stage-days-value { font-size: 15px; font-weight: 700; }
+        .stage-reminder-banner {
+            background: #fef3c7; border: 1px solid #fcd34d; border-radius: 8px;
+            padding: 12px 16px; margin-bottom: 20px; font-size: 13px; color: #92400e;
+            display: flex; align-items: center; gap: 10px;
+        }
+        body.dark .stage-reminder-banner { background: #1c1700; color: #fde68a; border-color: #854d0e; }
+
+        /* =====================================================
            DEVICE CARD FEEDBACK
         ===================================================== */
         .device-card { transition: box-shadow var(--transition); }
@@ -983,6 +1119,50 @@ if ($alertTriggered) {
                 <div><?php echo $smsStatusMessage; ?></div>
             </div>
             <?php endif; ?>
+
+            <!-- STAGE REMINDER BANNER -->
+            <?php if ($pendingReminder): ?>
+            <div class="stage-reminder-banner" id="stageReminderBanner">
+                <i class="fa-solid fa-seedling fa-lg"></i>
+                <div style="flex:1;">
+                    <strong>Stage Check Required</strong> —
+                    <?php echo htmlspecialchars($stageLabel); ?> has reached
+                    <?php echo $daysPassed; ?> days. Please inspect the substrate bags.
+                </div>
+                <button onclick="openExtendModal()" class="btn btn-ghost"
+                    style="font-size:12px;padding:6px 12px;margin-right:6px;">
+                    <i class="fa-solid fa-clock"></i> Not Yet — Extend
+                </button>
+                <button onclick="openAdvanceModal()" class="btn btn-primary"
+                    style="font-size:12px;padding:6px 12px;">
+                    <i class="fa-solid fa-circle-check"></i> Confirm & Advance
+                </button>
+            </div>
+            <?php endif; ?>
+
+            <!-- STAGE INDICATOR -->
+            <div class="stage-indicator">
+                <div class="stage-icon-wrap" style="background:<?php echo $stageColor; ?>22;color:<?php echo $stageColor; ?>;">
+                    <i class="fa-solid <?php echo $stageIcon; ?>"></i>
+                </div>
+                <div>
+                    <div class="stage-name-label">Active Growth Stage</div>
+                    <div class="stage-name-value" style="color:<?php echo $stageColor; ?>;">
+                        <?php echo htmlspecialchars($stageLabel); ?>
+                    </div>
+                    <div class="stage-thresh">
+                        Temp: <?php echo $MIN_TEMP; ?>–<?php echo $MAX_TEMP; ?>°C
+                        &nbsp;|&nbsp;
+                        RH: <?php echo $MIN_HUM; ?>–<?php echo $MAX_HUM; ?>%
+                    </div>
+                </div>
+                <div class="stage-progress">
+                    <div class="stage-days-label">Days in Stage</div>
+                    <div class="stage-days-value" style="color:<?php echo $stageColor; ?>;">
+                        <?php echo $daysPassed; ?> / <?php echo $expectedDays; ?>
+                    </div>
+                </div>
+            </div>
 
             <!-- STAT CARDS -->
             <div class="grid grid-4">
@@ -1179,6 +1359,48 @@ if ($alertTriggered) {
             </div>
             <hr class="modal-divider">
             <div class="setting-section">
+                <div class="setting-section-title">Cultivation Stage</div>
+                <div class="setting-row">
+                    <span>Active Growth Stage</span>
+                    <select id="growthStage" class="field">
+                        <option value="colonization" <?php echo $stage==='colonization'?'selected':''; ?>>
+                            🌱 Colonization (24–28°C | 70–85%)
+                        </option>
+                        <option value="pinning" <?php echo $stage==='pinning'?'selected':''; ?>>
+                            🪡 Pinning Initiation (18–24°C | 85–95%)
+                        </option>
+                        <option value="fruiting" <?php echo $stage==='fruiting'?'selected':''; ?>>
+                            🍄 Fruiting (24–28°C | 80–95%)
+                        </option>
+                    </select>
+                </div>
+                <div style="font-size:11px;color:var(--text-muted);margin-top:-8px;margin-bottom:12px;">
+                    Changing stage resets the timer and adjusts all thresholds immediately.
+                </div>
+            </div>
+            <hr class="modal-divider">
+            <div class="setting-section">
+                <div class="setting-section-title">ML Classification Algorithm</div>
+                <div class="setting-row">
+                    <span>Active Algorithm</span>
+                    <select id="mlAlgorithm" class="field">
+                        <option value="Decision Tree" <?php echo $activeAlgo==='Decision Tree'?'selected':''; ?>>
+                            Decision Tree
+                        </option>
+                        <option value="Random Forest" <?php echo $activeAlgo==='Random Forest'?'selected':''; ?>>
+                            Random Forest
+                        </option>
+                        <option value="KNN" <?php echo $activeAlgo==='KNN'?'selected':''; ?>>
+                            KNN
+                        </option>
+                    </select>
+                </div>
+                <div style="font-size:11px;color:var(--text-muted);margin-top:-8px;margin-bottom:12px;">
+                    Selects which trained model classifies environmental conditions.
+                </div>
+            </div>
+            <hr class="modal-divider">
+            <div class="setting-section">
                 <div class="setting-section-title">Preferences</div>
                 <div class="setting-row">
                     <span>Temperature Unit</span>
@@ -1199,6 +1421,71 @@ if ($alertTriggered) {
         <div class="modal-foot">
             <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
             <button class="btn btn-primary" id="saveSettings">Save Changes</button>
+        </div>
+    </div>
+</div>
+
+<!-- EXTEND STAGE MODAL -->
+<div class="modal-backdrop" id="extendModal">
+    <div class="modal" style="max-width:420px;">
+        <div class="modal-head">
+            <h3><i class="fa-solid fa-clock" style="color:var(--primary);margin-right:8px;"></i>Extend Stage Duration</h3>
+            <button class="modal-close" onclick="closeExtendModal()"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <div class="modal-body">
+            <p style="font-size:14px;color:var(--text-muted);margin-bottom:16px;">
+                The substrate is not yet ready. How many more days before the next inspection reminder?
+            </p>
+            <div style="display:flex;align-items:center;gap:12px;">
+                <input type="number" id="extendDays" value="3" min="1" max="30"
+                    style="width:80px;padding:10px;border:1px solid var(--border);border-radius:8px;
+                           background:var(--bg-body);color:var(--text-main);font-size:16px;font-weight:700;text-align:center;">
+                <span style="font-size:14px;color:var(--text-muted);">days until next reminder</span>
+            </div>
+            <div style="font-size:12px;color:var(--text-muted);margin-top:10px;">
+                The system will stay in the current stage. A new reminder will fire after the specified days.
+            </div>
+        </div>
+        <div class="modal-foot">
+            <button class="btn btn-ghost" onclick="closeExtendModal()">Cancel</button>
+            <button class="btn btn-primary" id="confirmExtendBtn" onclick="confirmExtend()">
+                <i class="fa-solid fa-clock"></i> Extend & Remind
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- ADVANCE STAGE MODAL -->
+<div class="modal-backdrop" id="advanceModal">
+    <div class="modal" style="max-width:460px;">
+        <div class="modal-head">
+            <h3><i class="fa-solid fa-circle-check" style="color:var(--primary);margin-right:8px;"></i>Confirm Stage Advancement</h3>
+            <button class="modal-close" onclick="closeAdvanceModal()"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <div class="modal-body">
+            <p style="font-size:14px;color:var(--text-muted);margin-bottom:16px;">
+                You are confirming that the substrate bags have been physically inspected and are ready to advance.
+            </p>
+            <div style="background:var(--bg-body);border-radius:8px;padding:14px 16px;font-size:13px;">
+                <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+                    <span style="color:var(--text-muted);">From:</span>
+                    <strong id="advanceFromName" style="color:var(--text-main);"></strong>
+                </div>
+                <div style="display:flex;align-items:center;gap:10px;">
+                    <span style="color:var(--text-muted);">To:</span>
+                    <strong id="advanceToName" style="color:var(--primary);"></strong>
+                </div>
+            </div>
+            <input type="hidden" id="advanceNextKey">
+            <div style="font-size:12px;color:var(--text-muted);margin-top:12px;">
+                Thresholds will update immediately upon confirmation. This action is logged.
+            </div>
+        </div>
+        <div class="modal-foot">
+            <button class="btn btn-ghost" onclick="closeAdvanceModal()">Cancel</button>
+            <button class="btn btn-primary" id="confirmAdvanceBtn" onclick="confirmAdvance()">
+                <i class="fa-solid fa-circle-check"></i> Confirm & Advance
+            </button>
         </div>
     </div>
 </div>
@@ -1352,9 +1639,11 @@ document.getElementById('saveSettings').addEventListener('click', () => {
     btn.disabled = true;
 
     const fd = new FormData();
-    fd.append('ajax_action', 'save_settings');
-    fd.append('temp_unit',   document.getElementById('tempUnit').value);
-    fd.append('email_notif', document.getElementById('emailNotif').checked ? '1' : '0');
+    fd.append('ajax_action',  'save_settings');
+    fd.append('temp_unit',    document.getElementById('tempUnit').value);
+    fd.append('email_notif',  document.getElementById('emailNotif').checked ? '1' : '0');
+    fd.append('growth_stage', document.getElementById('growthStage').value);
+    fd.append('ml_algorithm', document.getElementById('mlAlgorithm').value);
 
     fetch('dashboard.php', { method: 'POST', body: fd })
         .then(r => r.json())
@@ -1368,6 +1657,7 @@ document.getElementById('saveSettings').addEventListener('click', () => {
                 btn.disabled = false;
                 pendingSettings = false;
                 closeModal();
+                // Reload to update stage indicator; always reload after settings
                 location.reload();
             }, 900);
         })
@@ -1455,6 +1745,79 @@ window.humChart = new Chart(document.getElementById('humChart'), {
 applyTheme(savedTheme);
 
 // ================================================
+// EXTEND STAGE MODAL
+// ================================================
+function openExtendModal() {
+    document.getElementById('extendModal').classList.add('open');
+    document.getElementById('extendDays').value = 3;
+}
+function closeExtendModal() {
+    document.getElementById('extendModal').classList.remove('open');
+}
+function confirmExtend() {
+    const days = parseInt(document.getElementById('extendDays').value) || 3;
+    if (days < 1) { alert('Please enter at least 1 day.'); return; }
+    const btn = document.getElementById('confirmExtendBtn');
+    btn.textContent = 'Extending...'; btn.disabled = true;
+    post({ ajax_action: 'extend_stage', extend_days: days })
+        .then(d => {
+            btn.textContent = 'Extend'; btn.disabled = false;
+            closeExtendModal();
+            // Hide reminder banner
+            const banner = document.getElementById('stageReminderBanner');
+            if (banner) banner.style.display = 'none';
+        })
+        .catch(() => { btn.textContent = 'Extend'; btn.disabled = false; });
+}
+
+// ================================================
+// ADVANCE STAGE MODAL
+// ================================================
+const stageOrder = ['colonization', 'pinning', 'fruiting'];
+const stageNames = {
+    'colonization': '🌱 Colonization',
+    'pinning'     : '🪡 Pinning Initiation',
+    'fruiting'    : '🍄 Fruiting'
+};
+const currentStageKey = '<?php echo $stage; ?>';
+
+function openAdvanceModal() {
+    const currentIdx = stageOrder.indexOf(currentStageKey);
+    const nextKey    = stageOrder[currentIdx + 1];
+    if (!nextKey) {
+        alert('You are already at the final stage (Fruiting). The current cycle is complete.');
+        return;
+    }
+    document.getElementById('advanceFromName').textContent = stageNames[currentStageKey] || currentStageKey;
+    document.getElementById('advanceToName').textContent   = stageNames[nextKey] || nextKey;
+    document.getElementById('advanceNextKey').value        = nextKey;
+    document.getElementById('advanceModal').classList.add('open');
+}
+function closeAdvanceModal() {
+    document.getElementById('advanceModal').classList.remove('open');
+}
+function confirmAdvance() {
+    const nextKey = document.getElementById('advanceNextKey').value;
+    const btn     = document.getElementById('confirmAdvanceBtn');
+    btn.textContent = 'Advancing...'; btn.disabled = true;
+
+    // Use save_settings to switch stage
+    post({
+        ajax_action:  'save_settings',
+        temp_unit:    document.getElementById('tempUnit') ? document.getElementById('tempUnit').value : 'C',
+        email_notif:  '1',
+        growth_stage: nextKey,
+        ml_algorithm: '<?php echo addslashes($activeAlgo); ?>',
+    }).then(d => {
+        btn.textContent = 'Confirm'; btn.disabled = false;
+        closeAdvanceModal();
+        if (d.stageChanged) location.reload();
+    }).catch(() => { btn.textContent = 'Confirm'; btn.disabled = false; });
+}
+
+// ================================================
+// SILENT AJAX LIVE UPDATE — no page reload
+// ================================================
 // SILENT AJAX LIVE UPDATE — no page reload
 // Updates: temp, hum, fan, pump, alert banner,
 //          charts, recent notifications, ML widget
@@ -1498,11 +1861,12 @@ function updateLiveData() {
             const banner     = document.getElementById('alertBanner');
             const bannerText = document.getElementById('alertBannerText');
             const notifDot   = document.querySelector('.notif-dot');
-            const isAbnormal = d.tempAbove || d.humAbove || d.humBelow;
+            const isAbnormal = d.tempAbove || d.tempBelow || d.humAbove || d.humBelow;
             if (banner) {
                 if (isAbnormal) {
                     const msgs = [];
-                    if (d.tempAbove) msgs.push('Temperature is ' + d.temperature + '°' + d.tempUnit + ' (Limit: ' + d.MAX_TEMP + '°' + d.tempUnit + ')');
+                    if (d.tempAbove) msgs.push('Temperature is ' + d.temperature + '°' + d.tempUnit + ' (Max: ' + d.stageMaxTemp + '°' + d.tempUnit + ')');
+                    if (d.tempBelow) msgs.push('Temperature is ' + d.temperature + '°' + d.tempUnit + ' (Min: ' + d.stageMinTemp + '°' + d.tempUnit + ')');
                     if (d.humAbove)  msgs.push('Humidity is HIGH: ' + d.humidity + '% (Max: ' + d.MAX_HUM + '%)');
                     if (d.humBelow)  msgs.push('Humidity is LOW: '  + d.humidity + '% (Min: ' + d.MIN_HUM + '%)');
                     const smsHtml = d.notifiedString
@@ -1565,10 +1929,26 @@ function updateLiveData() {
                 }
             }
 
+            // ── Stage progress counter ───────────────────
+            const daysEl = document.querySelector('.stage-days-value');
+            if (daysEl && d.daysPassed !== undefined) {
+                daysEl.textContent = d.daysPassed + ' / ' + d.expectedDays;
+            }
+
+            // ── Stage reminder banner ─────────────────────
+            const reminderBanner = document.getElementById('stageReminderBanner');
+            if (d.pendingReminder && reminderBanner) {
+                reminderBanner.style.display = 'flex';
+            } else if (!d.pendingReminder && reminderBanner) {
+                reminderBanner.style.display = 'none';
+            }
+
             // ── ML Widget ─────────────────────────────────
             const mlCard = document.getElementById('mlWidgetCard');
             if (mlCard) {
-                fetch('biosync_ml/ml_widget.php?temp=' + d.temperature + '&hum=' + d.humidity)
+                const algo = encodeURIComponent(d.activeAlgo || 'Random Forest');
+                const stg  = encodeURIComponent(d.stage || 'fruiting');
+                fetch('biosync_ml/ml_widget.php?temp=' + d.temperature + '&hum=' + d.humidity + '&algo=' + algo + '&stage=' + stg)
                     .then(r => r.text())
                     .then(html => { if (html && html.trim()) mlCard.innerHTML = html; })
                     .catch(() => {});

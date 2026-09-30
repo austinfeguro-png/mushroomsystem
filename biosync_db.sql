@@ -83,7 +83,8 @@ CREATE TABLE `sensor_logs` (
   `id` int(11) NOT NULL,
   `device_id` int(11) NOT NULL,
   `recorded_value` decimal(10,2) NOT NULL,
-  `recorded_at` datetime DEFAULT current_timestamp()
+  `recorded_at` datetime DEFAULT current_timestamp(),
+  `stage` varchar(20) DEFAULT 'colonization'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 --
@@ -284,7 +285,36 @@ INSERT INTO `system_settings` (`setting_key`, `setting_value`) VALUES
 ('max_temperature', '30.0'),
 ('min_humidity', '85.0'),
 ('system_status', 'NORMAL'),
-('temperature_unit', 'C');
+('temperature_unit', 'C'),
+
+-- Stage system (merged from stage_migration.sql)
+('current_stage', 'colonization'),
+('stage_started_at', ''),
+('stage_expected_days', '14'),
+
+-- Colonization thresholds
+('colonization_min_temp', '24'),
+('colonization_max_temp', '28'),
+('colonization_min_hum', '70'),
+('colonization_max_hum', '85'),
+('colonization_default_days', '14'),
+
+-- Pinning Initiation thresholds
+('pinning_min_temp', '18'),
+('pinning_max_temp', '24'),
+('pinning_min_hum', '85'),
+('pinning_max_hum', '95'),
+('pinning_default_days', '7'),
+
+-- Fruiting thresholds
+('fruiting_min_temp', '24'),
+('fruiting_max_temp', '28'),
+('fruiting_min_hum', '80'),
+('fruiting_max_hum', '95'),
+('fruiting_default_days', '5'),
+
+-- ML Algorithm
+('active_ml_algorithm', 'Random Forest');
 
 -- --------------------------------------------------------
 
@@ -335,7 +365,8 @@ ALTER TABLE `notifications`
 --
 ALTER TABLE `sensor_logs`
   ADD PRIMARY KEY (`id`),
-  ADD KEY `device_id` (`device_id`);
+  ADD KEY `device_id` (`device_id`),
+  ADD KEY `device_recorded_idx` (`device_id`, `recorded_at`);
 
 --
 -- Indexes for table `system_controls`
