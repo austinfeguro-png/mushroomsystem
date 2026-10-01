@@ -13,26 +13,10 @@ $userId   = $_SESSION['user_id'];
 $isAdmin  = isset($_SESSION['user_role']) && strtolower($_SESSION['user_role']) === 'admin';
 
 // ==========================================
-// 2. DATABASE CONNECTION
+// 2. DATABASE CONNECTION (shared config.php)
 // ==========================================
-$host        = 'localhost';
-$dbname      = 'biosync_db';
-$db_username = 'root';
-$db_password = '';
-
-try {
-    $pdo = new PDO(
-        "mysql:host=$host;dbname=$dbname;charset=utf8",
-        $db_username,
-        $db_password,
-        [
-            PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
-            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-        ]
-    );
-} catch (PDOException $e) {
-    die("Database Connection Failed: " . $e->getMessage());
-}
+require_once 'config.php';
+$pdo = getDB();
 
 // ==========================================
 // 3. SMS API FUNCTION (SEMAPHORE - PHILIPPINES)
@@ -259,7 +243,11 @@ $alertTriggered    = false;
 $abnormalConditions = [];
 
 if ($temperature > $MAX_TEMP) {
-    $abnormalConditions[] = "Temperature is {$temperature}°{$TEMP_UNIT} (Limit: {$MAX_TEMP}°{$TEMP_UNIT})";
+    $abnormalConditions[] = "Temperature is {$temperature}°{$TEMP_UNIT} (Max: {$MAX_TEMP}°{$TEMP_UNIT})";
+    $alertTriggered = true;
+}
+if ($temperature < $MIN_TEMP) {
+    $abnormalConditions[] = "Temperature is {$temperature}°{$TEMP_UNIT} (Min: {$MIN_TEMP}°{$TEMP_UNIT})";
     $alertTriggered = true;
 }
 if ($humidity < $MIN_HUM || $humidity > $MAX_HUM) {
@@ -275,13 +263,16 @@ if ($alertTriggered) {
     $notifiedNumbers  = [];
     foreach ($alertUsers as $u) { $notifiedNumbers[] = htmlspecialchars($u['full_name']) . " (" . htmlspecialchars($u['phone']) . ")"; }
 
+    // FIX: DB-backed SMS cooldown (shared with live_data.php + historicaldatapage.php)
     $cooldownSeconds  = 900;
-    $lastSmsSentTime  = isset($_SESSION['last_sms_sent']) ? $_SESSION['last_sms_sent'] : 0;
+    $lastSentStmt     = $pdo->query("SELECT setting_value FROM system_settings WHERE setting_key='last_sms_sent'");
+    $lastSmsSentTime  = $lastSentStmt ? (int)$lastSentStmt->fetchColumn() : 0;
     $smsSentJustNow   = false;
 
     if ((time() - $lastSmsSentTime) > $cooldownSeconds && count($alertUsers) > 0) {
         foreach ($alertUsers as $u) { sendSMS($u['phone'], $realSmsMessage); }
-        $_SESSION['last_sms_sent'] = time();
+        $upd = $pdo->prepare("INSERT INTO system_settings (setting_key, setting_value) VALUES ('last_sms_sent', :val) ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)");
+        $upd->execute(['val' => (string)time()]);
         $smsSentJustNow = true;
     }
 
@@ -297,12 +288,6 @@ if ($alertTriggered) {
             <span><strong>SMS Dispatch:</strong> {$notifiedString} {$dispatchStatus}</span>
         </div>
     ";
-} else {
-    // Only clear cooldown after 2x the cooldown period has passed without alerts
-    // This prevents re-firing immediately if conditions flicker
-    if (isset($_SESSION['last_sms_sent']) && (time() - $_SESSION['last_sms_sent']) > ($cooldownSeconds * 2)) {
-        unset($_SESSION['last_sms_sent']);
-    }
 }
 ?>
 <!DOCTYPE html>
@@ -1113,12 +1098,10 @@ if ($alertTriggered) {
         <div class="page-body">
 
             <!-- ALERT BANNER -->
-            <?php if ($alertTriggered): ?>
-            <div class="alert-banner">
-                <i class="fa-solid fa-triangle-exclamation"></i>
-                <div><?php echo $smsStatusMessage; ?></div>
+            <div class="alert-banner" id="alertBanner" style="display:<?php echo $alertTriggered ? 'flex' : 'none'; ?>;">
+                <i class="fa-solid fa-triangle-exclamation" style="flex-shrink:0;"></i>
+                <div id="alertBannerText" style="flex:1;"><?php echo $smsStatusMessage; ?></div>
             </div>
-            <?php endif; ?>
 
             <!-- STAGE REMINDER BANNER -->
             <?php if ($pendingReminder): ?>
@@ -1171,7 +1154,7 @@ if ($alertTriggered) {
                 <div class="card stat-card">
                     <div>
                         <div class="stat-label">Temperature</div>
-                        <div class="stat-value <?php echo ($temperature > $MAX_TEMP) ? 'pulse' : ''; ?>">
+                        <div class="stat-value <?php echo ($temperature > $MAX_TEMP || $temperature < $MIN_TEMP) ? 'pulse' : ''; ?>">
                             <?php echo $temperature; ?> <span class="stat-unit">°<?php echo htmlspecialchars($TEMP_UNIT); ?></span>
                         </div>
                     </div>
@@ -1616,6 +1599,15 @@ document.getElementById('pumpToggle').addEventListener('change', function () {
 });
 
 // ================================================
+// AJAX HELPER (used by stage extend/advance modals)
+// ================================================
+function post(data) {
+    const fd = new FormData();
+    for (const [k, v] of Object.entries(data)) fd.append(k, v);
+    return fetch('dashboard.php', { method: 'POST', body: fd }).then(r => r.json());
+}
+
+// ================================================
 // MODAL
 // ================================================
 function openModal() {
@@ -1834,7 +1826,7 @@ function updateLiveData() {
             const statCards = document.querySelectorAll('.stat-value');
             if (statCards[0]) {
                 statCards[0].innerHTML = d.temperature + ' <span class="stat-unit">&deg;' + d.tempUnit + '</span>';
-                statCards[0].className = 'stat-value' + (d.tempAbove ? ' pulse' : '');
+                statCards[0].className = 'stat-value' + ((d.tempAbove || d.tempBelow) ? ' pulse' : '');
             }
             if (statCards[1]) {
                 statCards[1].innerHTML = d.humidity + ' <span class="stat-unit">%</span>';

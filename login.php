@@ -3,19 +3,10 @@
 session_start();
 
 // ==========================================
-// 1. DATABASE CONNECTION
+// 1. DATABASE CONNECTION (shared config.php)
 // ==========================================
-$host = 'localhost';
-$dbname = 'biosync_db';
-$db_username = 'root'; // Default XAMPP username
-$db_password = '';     // Default XAMPP password
-
-try {
-    $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8", $db_username, $db_password);
-    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-} catch(PDOException $e) {
-    die("Database Connection Failed. Error: " . $e->getMessage());
-}
+require_once 'config.php';
+$pdo = getDB();
 
 $error_message = "";
 

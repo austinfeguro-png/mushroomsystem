@@ -3,22 +3,13 @@
 // BIO-SYNC LIVE DATA ENDPOINT  |  live_data.php
 // Fixed: SMS cooldown uses DB instead of PHP session (Bug 7)
 // Fixed: Consolidated device queries — 5 queries reduced to 3 (Issue 3)
+// Fixed: DB credentials centralized in config.php (getDB)
 // =============================================================
 session_start();
 header('Content-Type: application/json');
 
-$host    = 'localhost';
-$dbname  = 'biosync_db';
-$db_user = 'root';
-$db_pass = '';
-
-try {
-    $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8", $db_user, $db_pass);
-    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-} catch (PDOException $e) {
-    echo json_encode(['error' => 'DB connection failed']);
-    exit;
-}
+require_once 'config.php';
+$pdo = getDB();
 
 // ── Settings (single query) ─────────────────────────────────
 $settingsStmt = $pdo->query("SELECT setting_key, setting_value FROM system_settings");

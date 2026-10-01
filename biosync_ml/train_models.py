@@ -4,6 +4,7 @@ BIO-SYNC ML TRAINER  |  train_models.py
 =============================================================
 Fixed: Minute-level JOIN replaced with 60-second window (Bug 6)
 Fixed: Class imbalance detection + class_weight='balanced' (Issue 5)
+Fixed: Lossy pandas dedup replaced with SQL nearest-match pairing (Bug 8)
 
 RUN ONCE after collecting at least 50 sensor readings:
     python train_models.py
@@ -47,30 +48,42 @@ except mysql.connector.Error as e:
 # ----------------------------------------------------------
 print("[2/7] Loading sensor data (60-second pairing window) ...")
 query = """
-    SELECT
-        t.recorded_value                    AS temperature,
-        h.recorded_value                    AS humidity,
-        COALESCE(t.stage, 'fruiting')       AS stage
-    FROM sensor_logs t
-    JOIN sensor_logs h
-      ON h.device_id = (
-             SELECT id FROM devices
-             WHERE device_name = 'Humidity Node 1' LIMIT 1
-         )
-      AND ABS(TIMESTAMPDIFF(SECOND, t.recorded_at, h.recorded_at)) <= 60
-    WHERE t.device_id = (
-             SELECT id FROM devices
-             WHERE device_name = 'Temperature Node 1' LIMIT 1
-         )
-    ORDER BY t.recorded_at DESC
-    LIMIT 2000
+    SELECT temperature, humidity, stage, recorded_at
+    FROM (
+        SELECT
+            t1.recorded_value                AS temperature,
+            t1.recorded_at                   AS recorded_at,
+            COALESCE(t1.stage, 'fruiting')   AS stage,
+            (
+                SELECT h.recorded_value
+                FROM sensor_logs h
+                WHERE h.device_id = (
+                         SELECT id FROM devices
+                         WHERE device_name = 'Humidity Node 1' LIMIT 1
+                     )
+                  AND ABS(TIMESTAMPDIFF(SECOND, t1.recorded_at, h.recorded_at)) <= 60
+                ORDER BY ABS(TIMESTAMPDIFF(SECOND, t1.recorded_at, h.recorded_at)) ASC,
+                         h.recorded_at ASC
+                LIMIT 1
+            ) AS humidity
+        FROM sensor_logs t1
+        WHERE t1.device_id = (
+                 SELECT id FROM devices
+                 WHERE device_name = 'Temperature Node 1' LIMIT 1
+             )
+        ORDER BY t1.recorded_at DESC
+        LIMIT 2000
+    ) AS paired
+    WHERE humidity IS NOT NULL
 """
 df = pd.read_sql(query, conn)
 conn.close()
 
-# Drop duplicate pairings — keep closest humidity match per temp reading
-df = df.drop_duplicates(subset=['temperature', 'stage'])
-print(f"      {len(df)} paired readings loaded after dedup.")
+# FIX (Bug 8): dedup happens in SQL now — each temperature reading is paired
+# with exactly ONE humidity reading (nearest timestamp within the 60-second
+# window). The old pandas dedup-on-(temperature, stage) call also deleted
+# legitimate distinct readings that happened to share a value.
+print(f"      {len(df)} paired readings loaded (1 humidity match per temperature reading).")
 
 if len(df) < 50:
     print("\n  [WARNING] Need at least 50 readings. Let Arduino collect more then retry.")

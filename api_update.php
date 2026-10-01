@@ -7,27 +7,12 @@
 // Fixed: $isAbnormal now includes $temperature < $MIN_TEMP (Bug 4)
 // Fixed: Low temp notification condition added (Bug 5)
 // Fixed: Input range validation added (Issue 2 / Medium)
+// Fixed: DB credentials centralized in config.php (getDB)
 // ==========================================================
 header('Content-Type: text/plain');
 
-$dbHost = 'localhost';
-$dbName = 'biosync_db';
-$dbUser = 'root';
-$dbPass = '';
-
-try {
-    $pdo = new PDO(
-        "mysql:host=$dbHost;dbname=$dbName;charset=utf8",
-        $dbUser, $dbPass,
-        [
-            PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
-            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-        ]
-    );
-} catch (PDOException $e) {
-    echo "CMD:FAN=0,PUMP=0";
-    exit;
-}
+require_once 'config.php';
+$pdo = getDB();
 
 // ----------------------------------------------------------
 // 1. READ & VALIDATE SENSOR DATA

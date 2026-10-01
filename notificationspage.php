@@ -13,26 +13,10 @@ $userId   = $_SESSION['user_id'];
 $isAdmin = isset($_SESSION['user_role']) && strtolower($_SESSION['user_role']) === 'admin';
 
 // ==========================================
-// 2. DATABASE CONNECTION
+// 2. DATABASE CONNECTION (shared config.php)
 // ==========================================
-$host        = 'localhost';
-$dbname      = 'biosync_db';
-$db_username = 'root';
-$db_password = '';
-
-try {
-    $pdo = new PDO(
-        "mysql:host=$host;dbname=$dbname;charset=utf8",
-        $db_username,
-        $db_password,
-        [
-            PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
-            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-        ]
-    );
-} catch (PDOException $e) {
-    die("Database Connection Failed: " . $e->getMessage());
-}
+require_once 'config.php';
+$pdo = getDB();
 
 // ==========================================
 // 3. HANDLE AJAX POST REQUESTS
@@ -100,9 +84,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax_action'])) {
 $settingsStmt = $pdo->query("SELECT setting_key, setting_value FROM system_settings");
 $settings     = $settingsStmt->fetchAll(PDO::FETCH_KEY_PAIR);
 
-$MIN_HUM   = isset($settings['min_humidity'])    ? (float)$settings['min_humidity']    : 85.0;
-$MAX_HUM   = isset($settings['max_humidity'])    ? (float)$settings['max_humidity']    : 95.0;
-$MAX_TEMP  = isset($settings['max_temperature']) ? (float)$settings['max_temperature'] : 30.0;
+// FIX: stage-based thresholds — consistent with dashboard.php + live_data.php
+$stage     = $settings['current_stage'] ?? 'colonization';
+$MIN_TEMP  = (float)($settings["{$stage}_min_temp"] ?? 24.0);
+$MAX_TEMP  = (float)($settings["{$stage}_max_temp"] ?? 28.0);
+$MIN_HUM   = (float)($settings["{$stage}_min_hum"]  ?? 70.0);
+$MAX_HUM   = (float)($settings["{$stage}_max_hum"]  ?? 85.0);
 $TEMP_UNIT = isset($settings['temperature_unit'])? $settings['temperature_unit']       : 'C';
 $EMAIL_NOTIF = isset($settings['email_notifications']) ? $settings['email_notifications'] : '1';
 
@@ -117,7 +104,11 @@ $abnormalConditions = [];
 $smsStatusMessage   = '';
 
 if ($temperature > $MAX_TEMP) {
-    $abnormalConditions[] = "Temperature is {$temperature}°{$TEMP_UNIT} (Limit: {$MAX_TEMP}°{$TEMP_UNIT})";
+    $abnormalConditions[] = "Temperature is {$temperature}°{$TEMP_UNIT} (Max: {$MAX_TEMP}°{$TEMP_UNIT})";
+    $alertTriggered = true;
+}
+if ($temperature < $MIN_TEMP) {
+    $abnormalConditions[] = "Temperature is {$temperature}°{$TEMP_UNIT} (Min: {$MIN_TEMP}°{$TEMP_UNIT})";
     $alertTriggered = true;
 }
 if ($humidity < $MIN_HUM || $humidity > $MAX_HUM) {

@@ -4,10 +4,9 @@ if (!isset($_SESSION['user_id'])) { header("Location: index.php"); exit(); }
 if (!isset($_SESSION['user_role']) || strtolower($_SESSION['user_role']) !== 'admin') { header("Location: dashboard.php"); exit(); }
 $userName = $_SESSION['user_name'];
 
-$host = 'localhost'; $dbname = 'biosync_db'; $db_username = 'root'; $db_password = '';
-try {
-    $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8", $db_username, $db_password, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]);
-} catch(PDOException $e) { die("Database Connection Failed: " . $e->getMessage()); }
+// DB via shared config.php
+require_once 'config.php';
+$pdo = getDB();
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax_action'])) {
     header('Content-Type: application/json');
