@@ -64,8 +64,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax_action'])) {
     // Save settings
     if ($_POST['ajax_action'] === 'save_settings') {
         if (!$isAdmin) { echo json_encode(['success'=>false,'error'=>'Unauthorized']); exit; }
+
         $tempUnit   = in_array($_POST['temp_unit'] ?? '', ['C','F']) ? $_POST['temp_unit'] : 'C';
         $emailNotif = intval($_POST['email_notif'] ?? 0) === 1 ? '1' : '0';
+        $newStage   = in_array($_POST['growth_stage'] ?? '', ['colonization','pinning','fruiting'])
+                      ? $_POST['growth_stage'] : 'colonization';
+        $newAlgo    = in_array($_POST['ml_algorithm'] ?? '', ['Decision Tree','Random Forest','KNN'])
+                      ? $_POST['ml_algorithm'] : 'Random Forest';
+
+        // Load current stage to detect if it changed
+        $curStage = $pdo->query("SELECT setting_value FROM system_settings WHERE setting_key='current_stage'")->fetchColumn();
+
         $stmt = $pdo->prepare("
             INSERT INTO system_settings (setting_key, setting_value)
             VALUES (:key, :val)
@@ -73,7 +82,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax_action'])) {
         ");
         $stmt->execute(['key' => 'temperature_unit',    'val' => $tempUnit]);
         $stmt->execute(['key' => 'email_notifications', 'val' => $emailNotif]);
-        echo json_encode(['success' => true]);
+        $stmt->execute(['key' => 'active_ml_algorithm', 'val' => $newAlgo]);
+        $stmt->execute(['key' => 'current_stage',       'val' => $newStage]);
+
+        // If stage changed, reset timer and log notification (same as dashboard.php)
+        if ($curStage !== $newStage) {
+            $stageLabelMap  = ['colonization'=>'Colonization','pinning'=>'Pinning Initiation','fruiting'=>'Fruiting'];
+            $defaultDaysMap = ['colonization'=>14,'pinning'=>7,'fruiting'=>5];
+            $stageLabel     = $stageLabelMap[$newStage] ?? ucfirst($newStage);
+            $defaultDays    = $defaultDaysMap[$newStage] ?? 14;
+
+            $stmt->execute(['key' => 'stage_started_at',   'val' => date('Y-m-d H:i:s')]);
+            $stmt->execute(['key' => 'stage_expected_days','val' => $defaultDays]);
+
+            $userName = $_SESSION['user_name'] ?? 'Admin';
+            $stageThresholds = [
+                'colonization' => '24–28°C | 70–85% RH',
+                'pinning'      => '18–24°C | 85–95% RH',
+                'fruiting'     => '24–28°C | 80–95% RH',
+            ];
+            $thresh = $stageThresholds[$newStage] ?? '';
+            $pdo->prepare("INSERT INTO notifications (title, description, message, type, icon_class, is_read, created_at)
+                VALUES (:title, :desc, :msg, 'info', 'fa-seedling', 0, NOW())")
+            ->execute([
+                'title' => 'Stage Advanced',
+                'desc'  => "{$userName} confirmed stage transition to {$stageLabel}. New thresholds: {$thresh}.",
+                'msg'   => "System has advanced to {$stageLabel} stage.",
+            ]);
+        }
+
+        echo json_encode(['success' => true, 'stageChanged' => ($curStage !== $newStage), 'newStage' => $newStage]);
         exit();
     }
 }
@@ -92,6 +130,7 @@ $MIN_HUM   = (float)($settings["{$stage}_min_hum"]  ?? 70.0);
 $MAX_HUM   = (float)($settings["{$stage}_max_hum"]  ?? 85.0);
 $TEMP_UNIT = isset($settings['temperature_unit'])? $settings['temperature_unit']       : 'C';
 $EMAIL_NOTIF = isset($settings['email_notifications']) ? $settings['email_notifications'] : '1';
+$activeAlgo = $settings['active_ml_algorithm'] ?? 'Random Forest';
 
 $tempStmt    = $pdo->query("SELECT recorded_value FROM sensor_logs WHERE device_id = (SELECT id FROM devices WHERE device_name = 'Temperature Node 1' LIMIT 1) ORDER BY recorded_at DESC LIMIT 1");
 $temperature = (float)$tempStmt->fetchColumn();
@@ -928,6 +967,42 @@ foreach ($notifications as $n) {
             </div>
             <hr class="modal-divider">
             <div class="setting-section">
+                <div class="setting-section-title">Cultivation Stage</div>
+                <div class="setting-row">
+                    <span>Active Growth Stage</span>
+                    <select id="growthStage" class="field">
+                        <option value="colonization" <?php echo $stage==='colonization'?'selected':''; ?>>
+                            🌱 Colonization (24–28°C | 70–85%)
+                        </option>
+                        <option value="pinning" <?php echo $stage==='pinning'?'selected':''; ?>>
+                            🪡 Pinning Initiation (18–24°C | 85–95%)
+                        </option>
+                        <option value="fruiting" <?php echo $stage==='fruiting'?'selected':''; ?>>
+                            🍄 Fruiting (24–28°C | 80–95%)
+                        </option>
+                    </select>
+                </div>
+                <div style="font-size:11px;color:var(--text-muted);margin-top:-8px;margin-bottom:12px;">
+                    Changing stage resets the timer and adjusts all thresholds immediately.
+                </div>
+            </div>
+            <hr class="modal-divider">
+            <div class="setting-section">
+                <div class="setting-section-title">ML Classification Algorithm</div>
+                <div class="setting-row">
+                    <span>Active Algorithm</span>
+                    <select id="mlAlgorithm" class="field">
+                        <option value="Decision Tree" <?php echo $activeAlgo==='Decision Tree'?'selected':''; ?>>Decision Tree</option>
+                        <option value="Random Forest" <?php echo $activeAlgo==='Random Forest'?'selected':''; ?>>Random Forest</option>
+                        <option value="KNN" <?php echo $activeAlgo==='KNN'?'selected':''; ?>>KNN</option>
+                    </select>
+                </div>
+                <div style="font-size:11px;color:var(--text-muted);margin-top:-8px;margin-bottom:12px;">
+                    Selects which trained model classifies environmental conditions.
+                </div>
+            </div>
+            <hr class="modal-divider">
+            <div class="setting-section">
                 <div class="setting-section-title">Preferences</div>
                 <div class="setting-row">
                     <span>Temperature Unit</span>
@@ -1163,6 +1238,8 @@ document.getElementById('saveSettings').addEventListener('click', () => {
         ajax_action: 'save_settings',
         temp_unit:   document.getElementById('tempUnit').value,
         email_notif: document.getElementById('emailNotif').checked ? '1' : '0',
+        growth_stage: document.getElementById('growthStage').value,
+        ml_algorithm: document.getElementById('mlAlgorithm').value,
     }).then(data => {
         if (!data.success) throw new Error();
         btn.textContent = 'Saved!';
@@ -1172,6 +1249,8 @@ document.getElementById('saveSettings').addEventListener('click', () => {
             btn.style.background = '';
             btn.disabled = false;
             closeModal();
+            // Reload so stage thresholds + alert banner reflect the new stage
+            location.reload();
         }, 900);
     }).catch(() => {
         btn.textContent = 'Error — try again';
