@@ -338,7 +338,7 @@ foreach ($notifications as $n) {
         /* =====================================================
            MAIN AREA
         ===================================================== */
-        .main { margin-left: var(--sidebar-w); flex: 1; display: flex; flex-direction: column; min-height: 100vh; }
+        .main { margin-left: var(--sidebar-w); flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 100vh; }
 
         /* =====================================================
            TOPBAR
@@ -428,7 +428,7 @@ foreach ($notifications as $n) {
         /* =====================================================
            PAGE BODY
         ===================================================== */
-        .page-body { padding: 24px; flex: 1; }
+        .page-body { padding: 24px; flex: 1; min-width: 0; }
 
         /* =====================================================
            CARD
@@ -748,6 +748,14 @@ foreach ($notifications as $n) {
             .user-chip { padding: 3px; }
         }
 
+        /* Very narrow screens: keep the topbar on one line */
+        @media (max-width: 480px) {
+            .topbar { padding: 0 12px; gap: 8px; }
+            .topbar-left, .topbar-left > div { min-width: 0; }
+            .topbar-title { font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+            .topbar-sub { display: none; }
+        }
+
         /* Fade-out animation for dismissed items */
         .notif-item.removing {
             opacity: 0;
@@ -755,7 +763,41 @@ foreach ($notifications as $n) {
             pointer-events: none;
             transition: opacity 0.3s ease, transform 0.3s ease;
         }
-    </style>
+    
+        /* =====================================================
+           SETTINGS MODAL — responsive refinements
+           (scoped to #settingsModal; mirrors profile.php)
+        ===================================================== */
+        #settingsModal.modal-backdrop {
+            padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right))
+                     max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+        }
+        #settingsModal .modal { max-height: 100%; display: flex; flex-direction: column; }
+        #settingsModal .modal-head, #settingsModal .modal-foot { flex-shrink: 0; }
+        #settingsModal .modal-body { overflow-y: auto; overscroll-behavior: contain; }
+        body:has(#settingsModal.open) { overflow: hidden; }
+        #settingsModal .setting-row { gap: 12px; }
+        #settingsModal select.field, #settingsModal select.field-sm { max-width: 60%; }
+        /* larger tap area + keyboard-focusable toggles */
+        #settingsModal .toggle::before { content: ''; position: absolute; inset: -10px; }
+        #settingsModal .toggle input { display: block; position: absolute; inset: 0; width: 100%; height: 100%;
+            margin: 0; padding: 0; border: 0; opacity: 0; cursor: pointer; z-index: 1; }
+        #settingsModal .toggle input:focus-visible + .toggle-track { outline: 2px solid var(--primary); outline-offset: 2px; }
+        @media (max-width: 700px) {
+            #settingsModal select.field, #settingsModal select.field-sm { font-size: 16px; } /* no iOS zoom */
+        }
+        @media (max-width: 480px) {
+            #settingsModal .setting-row:has(select) { flex-direction: column; align-items: stretch; gap: 8px; }
+            #settingsModal select.field, #settingsModal select.field-sm { width: 100%; max-width: 100%; }
+            #settingsModal .modal-head { padding: 14px 16px; }
+            #settingsModal .modal-body { padding: 16px; }
+            #settingsModal .modal-foot { padding: 12px 16px; }
+            #settingsModal .modal-foot .btn { flex: 1; }
+        }
+        @media (pointer: coarse) {
+            #settingsModal .modal-close { min-width: 44px; min-height: 44px; }
+        }
+</style>
 </head>
 <body>
 
@@ -1324,6 +1366,14 @@ function updateNotifPage() {
 }
 
 setInterval(updateNotifPage, 5000);
+</script>
+<script>
+// Escape closes the Settings modal
+document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Escape') return;
+    var m = document.getElementById('settingsModal');
+    if (m) m.classList.remove('open');
+});
 </script>
 </body>
 </html>

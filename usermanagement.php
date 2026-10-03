@@ -149,7 +149,7 @@ $stage       = $settings['current_stage'] ?? 'colonization';
         .sidebar-backdrop.show{display:block;}
 
         /* MAIN */
-        .main{margin-left:var(--sidebar-w);flex:1;display:flex;flex-direction:column;min-height:100vh;}
+        .main{margin-left:var(--sidebar-w);flex:1;min-width:0;display:flex;flex-direction:column;min-height:100vh;}
 
         /* TOPBAR */
         .topbar{height:var(--topbar-h);background:var(--bg-card);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;padding:0 24px;position:sticky;top:0;z-index:100;transition:background var(--transition);gap:16px;}
@@ -167,7 +167,7 @@ $stage       = $settings['current_stage'] ?? 'colonization';
         .user-chip img{width:28px;height:28px;border-radius:50%;}
 
         /* PAGE BODY */
-        .page-body{padding:24px;flex:1;}
+        .page-body{padding:24px;flex:1;min-width:0;}
 
         /* CARD */
         .card{background:var(--bg-card);border-radius:var(--radius);padding:24px;border:1px solid var(--border);box-shadow:var(--shadow-sm);transition:background var(--transition);}
@@ -264,9 +264,50 @@ $stage       = $settings['current_stage'] ?? 'colonization';
             .topbar{padding:0 16px;}
             .form-row{grid-template-columns:1fr;}
             .search-wrap{width:100%;}
+            .data-table thead th{white-space:normal;}
         }
         @media(max-width:640px){.user-chip-name,.user-chip-role{display:none;}.user-chip{padding:3px;}}
-    </style>
+        @media(max-width:480px){
+            .topbar{padding:0 12px;gap:8px;}
+            .topbar-left,.topbar-left>div{min-width:0;}
+            .topbar-title{font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+            .topbar-sub{display:none;}
+        }
+    
+        /* =====================================================
+           SETTINGS MODAL — responsive refinements
+           (scoped to #settingsModal; mirrors profile.php)
+        ===================================================== */
+        #settingsModal.modal-backdrop {
+            padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right))
+                     max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+        }
+        #settingsModal .modal { max-height: 100%; display: flex; flex-direction: column; }
+        #settingsModal .modal-head, #settingsModal .modal-foot { flex-shrink: 0; }
+        #settingsModal .modal-body { overflow-y: auto; overscroll-behavior: contain; }
+        body:has(#settingsModal.open) { overflow: hidden; }
+        #settingsModal .setting-row { gap: 12px; }
+        #settingsModal select.field, #settingsModal select.field-sm { max-width: 60%; }
+        /* larger tap area + keyboard-focusable toggles */
+        #settingsModal .toggle::before { content: ''; position: absolute; inset: -10px; }
+        #settingsModal .toggle input { display: block; position: absolute; inset: 0; width: 100%; height: 100%;
+            margin: 0; padding: 0; border: 0; opacity: 0; cursor: pointer; z-index: 1; }
+        #settingsModal .toggle input:focus-visible + .toggle-track { outline: 2px solid var(--primary); outline-offset: 2px; }
+        @media (max-width: 700px) {
+            #settingsModal select.field, #settingsModal select.field-sm { font-size: 16px; } /* no iOS zoom */
+        }
+        @media (max-width: 480px) {
+            #settingsModal .setting-row:has(select) { flex-direction: column; align-items: stretch; gap: 8px; }
+            #settingsModal select.field, #settingsModal select.field-sm { width: 100%; max-width: 100%; }
+            #settingsModal .modal-head { padding: 14px 16px; }
+            #settingsModal .modal-body { padding: 16px; }
+            #settingsModal .modal-foot { padding: 12px 16px; }
+            #settingsModal .modal-foot .btn { flex: 1; }
+        }
+        @media (pointer: coarse) {
+            #settingsModal .modal-close { min-width: 44px; min-height: 44px; }
+        }
+</style>
 </head>
 <body>
 <div class="shell">
@@ -622,6 +663,14 @@ function filterUsers() {
 }
 
 function confirmLogout(e) { e.preventDefault(); if (confirm('Are you sure you want to log out?')) location.href = 'logout.php'; }
+</script>
+<script>
+// Escape closes the Settings modal
+document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Escape') return;
+    var m = document.getElementById('settingsModal');
+    if (m) m.classList.remove('open');
+});
 </script>
 </body>
 </html>

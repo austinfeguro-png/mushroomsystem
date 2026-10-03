@@ -23,7 +23,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
         // Fetch user from the database using the username column
         $stmt = $pdo->prepare("SELECT * FROM users WHERE username = :username LIMIT 1");
-        $stmt->execute(['username' => $username]);
+        $stmt->execute(['username' => $username]);  
         $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
         // Verify user exists AND password is correct
@@ -83,6 +83,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             justify-content: center;
             align-items: center;
             min-height: 100vh;
+            padding: 0 20px;
             background-image: radial-gradient(circle at top right, #eff6ff 0%, transparent 40%),
                               radial-gradient(circle at bottom left, #f0fdf4 0%, transparent 40%);
         }
