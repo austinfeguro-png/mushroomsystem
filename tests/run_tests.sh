@@ -6,7 +6,7 @@
 #
 # Usage:
 #   bash tests/run_tests.sh          # static checks only
-#   bash tests/run_tests.sh --live   # + curl smoke tests (needs Apache/MySQL/Flask running)
+#   bash tests/run_tests.sh --live   # + read-only endpoint smoke checks (needs services running)
 #
 # Exit code: 0 = all non-expected failures passed, 1 = something failed.
 # =============================================================
@@ -29,11 +29,10 @@ while IFS= read -r f; do
 done < <(ls *.php biosync_ml/*.php 2>/dev/null)
 
 # -------------------------------------------------------------
-head_ "2. Python compile check (py_compile, biosync_ml)"
+head_ "2. Python compile check (in-memory, biosync_ml)"
 for f in biosync_ml/prediction_api.py biosync_ml/train_models.py; do
-  if "$PY_BIN" -m py_compile "$f" 2>/dev/null; then pass "$f"; else fail "$f — compile error"; fi
+  if "$PY_BIN" -c 'import pathlib,sys; compile(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"), sys.argv[1], "exec")' "$f" 2>/dev/null; then pass "$f"; else fail "$f — compile error"; fi
 done
-rm -rf biosync_ml/__pycache__ 2>/dev/null   # clean the cache py_compile creates
 
 # -------------------------------------------------------------
 head_ "3. Python static contract tests"
@@ -43,39 +42,35 @@ head_ "3. Python static contract tests"
 head_ "4. Generated-artifact status (informational)"
 if [ -f biosync_ml/biosync_models.pkl ]; then
   pass "biosync_models.pkl present (new multi-model format)"
+elif [ -f biosync_ml/biosync_model.pkl ]; then
+  warn "Only legacy biosync_model.pkl present — prediction_api.py uses its compatibility fallback; retrain recommended."
 else
-  warn "biosync_ml/biosync_models.pkl MISSING — run train_models.py, then restart prediction_api.py (API /predict returns 500 until then). KNOWN ISSUE."
-fi
-if [ -f biosync_ml/biosync_model.pkl ]; then
-  warn "biosync_ml/biosync_model.pkl (old singular format) still tracked — unused by current code. Candidate for removal."
+  warn "No model artifact present — run train_models.py before using API /predict."
 fi
 grep -q '"total_samples"' biosync_ml/ml_results.json \
   && pass "ml_results.json has new-format keys" \
   || warn "ml_results.json is OLD format (no total_samples) — retrain to refresh. KNOWN ISSUE."
 
 # -------------------------------------------------------------
-head_ "5. Live smoke tests (--live only; read-only GETs)"
+head_ "5. Live smoke tests (--live only; requests must not mutate project data)"
 if [ "${1:-}" = "--live" ]; then
-  # 5a. Apache + api_update.php contract
+  # 5a. Apache + api_update.php rejects unauthenticated sensor writes
   if curl -s -o /dev/null --max-time 5 "http://localhost/mushroomsystem/login.php"; then
-    R=$(curl -s --max-time 5 "http://localhost/mushroomsystem/api_update.php?temp=27&hum=86")
-    if echo "$R" | grep -qE '^CMD:FAN=[01],PUMP=[01]$'; then
-      pass "api_update.php responded: $R"
+    R=$(curl -s --max-time 5 -X POST -d "temp=27&hum=86" "http://localhost/mushroomsystem/api_update.php")
+    if [ "$R" = "CMD:FAN=0,PUMP=0" ]; then
+      pass "api_update.php rejects unauthenticated sensor writes"
     else
-      fail "api_update.php unexpected response: '$R' (expected CMD:FAN=n,PUMP=n)"
+      fail "api_update.php unexpected unauthenticated response: '$R'"
     fi
-    # Out-of-range values must be rejected with safe command
-    R2=$(curl -s --max-time 5 "http://localhost/mushroomsystem/api_update.php?temp=999&hum=86")
-    if [ "$R2" = "CMD:FAN=0,PUMP=0" ]; then pass "api_update.php rejects implausible temp=999"; else fail "range validation failed: '$R2'"; fi
   else
     warn "Apache not reachable on :80 — skipping api_update tests"
   fi
   # 5b. live_data.php JSON
   if curl -s -o /dev/null --max-time 5 "http://localhost/mushroomsystem/live_data.php"; then
-    if curl -s --max-time 5 "http://localhost/mushroomsystem/live_data.php" | "$PY_BIN" -c "import sys,json; d=json.load(sys.stdin); assert 'temperature' in d and 'stage' in d" 2>/dev/null; then
-      pass "live_data.php returns valid JSON with expected keys"
+    if curl -s --max-time 5 "http://localhost/mushroomsystem/live_data.php" | "$PY_BIN" -c "import sys,json; d=json.load(sys.stdin); assert 'error' in d" 2>/dev/null; then
+      pass "live_data.php denies unauthenticated access"
     else
-      fail "live_data.php JSON invalid or missing keys"
+      fail "live_data.php did not return the expected unauthenticated error"
     fi
   else
     warn "live_data.php not reachable — Apache down or DB down"

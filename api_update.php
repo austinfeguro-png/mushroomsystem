@@ -11,19 +11,36 @@
 // ==========================================================
 header('Content-Type: text/plain');
 
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    http_response_code(405);
+    echo "CMD:FAN=0,PUMP=0";
+    exit;
+}
+
+$deviceToken = getenv('BIOSYNC_DEVICE_TOKEN') ?: '';
+$providedToken = $_SERVER['HTTP_X_DEVICE_TOKEN'] ?? '';
+if ($deviceToken === '' || !hash_equals($deviceToken, (string)$providedToken)) {
+    http_response_code(403);
+    echo "CMD:FAN=0,PUMP=0";
+    exit;
+}
+
 require_once 'config.php';
 $pdo = getDB();
 
 // ----------------------------------------------------------
 // 1. READ & VALIDATE SENSOR DATA
 // ----------------------------------------------------------
-$temperature = isset($_GET['temp']) ? floatval($_GET['temp']) : null;
-$humidity    = isset($_GET['hum'])  ? floatval($_GET['hum'])  : null;
+$temperatureRaw = $_POST['temp'] ?? null;
+$humidityRaw    = $_POST['hum'] ?? null;
 
-if ($temperature === null || $humidity === null) {
+if (!is_scalar($temperatureRaw) || !is_numeric($temperatureRaw)
+    || !is_scalar($humidityRaw) || !is_numeric($humidityRaw)) {
     echo "CMD:FAN=0,PUMP=0";
     exit;
 }
+$temperature = (float)$temperatureRaw;
+$humidity    = (float)$humidityRaw;
 
 // FIX (Issue 2): Range validation — reject implausible sensor values
 if ($temperature < -10 || $temperature > 60) {
@@ -94,8 +111,8 @@ try {
 // ----------------------------------------------------------
 // 5. THRESHOLD CHECK → UPDATE FAN & PUMP STATES
 // ----------------------------------------------------------
-$fanState  = ($temperature > $MAX_TEMP || $temperature < $MIN_TEMP) ? 1 : 0;
-$pumpState = ($humidity < $MIN_HUM || $humidity > $MAX_HUM) ? 1 : 0;
+$fanState  = $temperature > $MAX_TEMP ? 1 : 0;
+$pumpState = $humidity < $MIN_HUM ? 1 : 0;
 
 try {
     $pdo->prepare("
@@ -143,7 +160,7 @@ if ($isAbnormal) {
             if ($humidity < $MIN_HUM)
                 $conditions[] = "Humidity is LOW: {$humidity}% (Min: {$MIN_HUM}%). Pump activated.";
             if ($humidity > $MAX_HUM)
-                $conditions[] = "Humidity is HIGH: {$humidity}% (Max: {$MAX_HUM}%). Ventilation activated.";
+                $conditions[] = "Humidity is HIGH: {$humidity}% (Max: {$MAX_HUM}%). Check ventilation.";
 
             $condStr = implode(' & ', $conditions);
 
@@ -153,7 +170,7 @@ if ($isAbnormal) {
             if ($isTemp && $isHum) {
                 $title     = 'Critical Alert';
                 $iconClass = 'fa-triangle-exclamation';
-                $desc      = "Temperature and Humidity thresholds breached. Auto-systems activated.";
+                $desc      = "Temperature and Humidity thresholds breached. Check the grow room and actuator status.";
             } elseif ($isTemp) {
                 $title     = $temperature > $MAX_TEMP ? 'High Temperature' : 'Low Temperature';
                 $iconClass = 'fa-temperature-half';
@@ -165,7 +182,7 @@ if ($isAbnormal) {
                 $iconClass = 'fa-droplet';
                 $desc      = $humidity < $MIN_HUM
                     ? "Humidity dropped below minimum. Water pump activated."
-                    : "Humidity exceeded maximum. Ventilation activated.";
+                    : "Humidity exceeded maximum. Check the grow room and ventilation.";
             }
 
             $pdo->prepare("
@@ -210,7 +227,6 @@ try {
             $checkStmt = $pdo->prepare("
                 SELECT COUNT(*) FROM notifications
                 WHERE type = 'stage_reminder'
-                AND is_read = 0
                 AND created_at >= :since
             ");
             $checkStmt->execute(['since' => $stageStartedAt]);
@@ -244,4 +260,4 @@ try {
 // ----------------------------------------------------------
 // 8. RESPOND TO ESP8266 / BROWSER
 // ----------------------------------------------------------
-echo "CMD:FAN={$fanState},PUMP={$pumpState}";
+echo "CMD:FAN={$fanState},PUMP={$pumpState},MIN_TEMP={$MIN_TEMP},MAX_TEMP={$MAX_TEMP},MIN_HUM={$MIN_HUM},MAX_HUM={$MAX_HUM}";

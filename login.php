@@ -34,6 +34,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 $error_message = "Your account has been deactivated. Please contact an administrator.";
             } else {
                 // Setup Session variables
+                session_regenerate_id(true);
                 $_SESSION['user_id'] = $user['id'];
                 $_SESSION['user_name'] = $user['full_name'];
                 $_SESSION['user_role'] = strtolower($user['role']); // Save role in lowercase for consistent admin checks

@@ -48,7 +48,8 @@ Three components work together:
 ├── biosync_ml/
 │   ├── train_models.py       # One-shot model trainer
 │   ├── prediction_api.py     # Flask prediction API (port 5000)
-│   ├── biosync_model.pkl     # Trained model (generated)
+│   ├── biosync_models.pkl    # Trained model set (generated; preferred)
+│   ├── biosync_model.pkl     # Legacy single-model fallback
 │   └── ml_results.json       # Model comparison metrics (generated)
 └── sketch_may16a/
     └── sketch_may16a.ino     # Arduino firmware
@@ -70,7 +71,7 @@ Three components work together:
 3. Import `biosync_db.sql` via phpMyAdmin (`http://localhost/phpmyadmin`).
 4. Open `http://localhost/<folder-name>/login.php` and log in.
 
-> Default DB credentials in the code are XAMPP defaults (`root` with empty password). Edit them in each PHP file if your setup differs.
+> Database credentials are centralized in `config.php`. The XAMPP defaults are `root` with an empty password; use a dedicated database account outside local development.
 
 ### 2. Machine learning service
 
@@ -92,18 +93,19 @@ python prediction_api.py   # keep running while the dashboard is open (port 5000
 | Alert indicator (LED/buzzer) | D7                       |
 | ESP8266 TX/RX                | D10/D11 (SoftwareSerial) |
 
-Open `sketch_may16a/sketch_may16a.ino` and set your WiFi credentials and the server IP (the machine running XAMPP) before uploading.
+Copy `sketch_may16a/secrets.h.example` to `sketch_may16a/secrets.h` (ignored by Git), then set the local WiFi name, password, and a long random device token there. Set the same token as the Apache environment variable `BIOSYNC_DEVICE_TOKEN` before starting Apache. Set the XAMPP server IP in the sketch and upload it. The sketch sends sensor data via authenticated POST; unauthenticated requests are rejected.
 
 ## ⚙️ Configuration
 
 Thresholds live in the `system_settings` database table and can be tuned from the dashboard:
 
-| Key                | Default | Meaning                     |
-| ------------------ | ------- | --------------------------- |
-| `max_temperature`  | 30.0 °C | Above this → fan on, alert  |
-| `min_humidity`     | 85.0 %  | Below this → pump on, alert |
-| `max_humidity`     | 90.0 %  | Above this → fan on, alert  |
-| `temperature_unit` | C       | Display unit                |
+| Stage       | Temperature | Relative humidity |
+| ----------- | ----------- | ----------------- |
+| Colonization | 24–28 °C   | 70–85%            |
+| Pinning      | 18–24 °C   | 85–95%            |
+| Fruiting     | 24–28 °C   | 80–95%            |
+
+The dashboard stores the selected stage and its thresholds in `system_settings`; the hardware API returns the active thresholds to the firmware so its local safety overrides stay in sync.
 
 - **SMS**: paste your Semaphore API key into `sendSMS()` in `dashboard.php` / `historicaldatapage.php`. All active users with a phone number on file receive alerts.
 - **Arduino overrides**: the firmware enforces the same thresholds locally, so safety automation continues even if the server is unreachable.
@@ -114,7 +116,7 @@ Thresholds live in the `system_settings` database table and can be tuned from th
 
 | Endpoint                    | Method | Purpose                                   |
 | --------------------------- | ------ | ----------------------------------------- |
-| `api_update.php?temp=&hum=` | GET    | Sensor ingest; returns `CMD:FAN=n,PUMP=n` |
+| `api_update.php`            | POST   | Form fields `temp`, `hum`; requires `X-Device-Token`; returns actuator state and active thresholds |
 | `live_data.php`             | GET    | Live JSON feed (auth required)            |
 | `*.php` AJAX actions        | POST   | `ajax_action=` handlers per page          |
 

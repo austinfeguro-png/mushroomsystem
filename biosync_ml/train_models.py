@@ -20,6 +20,8 @@ import mysql.connector
 from sklearn.tree            import DecisionTreeClassifier
 from sklearn.ensemble        import RandomForestClassifier
 from sklearn.neighbors       import KNeighborsClassifier
+from sklearn.preprocessing   import StandardScaler
+from sklearn.pipeline        import make_pipeline
 from sklearn.model_selection import train_test_split
 from sklearn.metrics         import accuracy_score, precision_score, recall_score
 
@@ -153,8 +155,8 @@ models_to_train = {
         n_estimators=100, random_state=42,
         class_weight='balanced' if use_balanced else None
     ),
-    # KNN has no class_weight — use oversampling note instead
-    'KNN'          : KNeighborsClassifier(n_neighbors=5),
+    # Scale temperature and humidity so their different units do not bias distance.
+    'KNN'          : make_pipeline(StandardScaler(), KNeighborsClassifier(n_neighbors=5)),
 }
 
 if use_balanced:

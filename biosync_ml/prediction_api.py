@@ -52,18 +52,23 @@ STAGE_THRESHOLDS = {
 # Load models on startup
 # ----------------------------------------------------------
 try:
-    with open('biosync_models.pkl','rb') as f:
-        models = pickle.load(f)
-    print(f"[OK] Models loaded: {list(models.keys())}")
-except FileNotFoundError:
-    print("[ERROR] biosync_models.pkl not found. Run train_models.py first.")
-
-try:
     with open('ml_results.json','r') as f:
         ml_results = json.load(f)
     print(f"[OK] ml_results.json loaded. Best: {ml_results.get('best_model','?')}")
 except FileNotFoundError:
     print("[WARNING] ml_results.json not found. Run train_models.py first.")
+
+try:
+    with open('biosync_models.pkl','rb') as f:
+        models = pickle.load(f)
+    print(f"[OK] Models loaded: {list(models.keys())}")
+except FileNotFoundError:
+    try:
+        with open('biosync_model.pkl','rb') as f:
+            models = {'Legacy Model': pickle.load(f)}
+        print("[WARNING] Loaded legacy biosync_model.pkl; retrain to create biosync_models.pkl.")
+    except FileNotFoundError:
+        print("[ERROR] No model artifact found. Run train_models.py first.")
 
 
 # ----------------------------------------------------------
@@ -153,4 +158,4 @@ if __name__ == '__main__':
     print("  Rate limit: 60 req/min")
     print("  CTRL+C to stop")
     print("==============================\n")
-    app.run(host='0.0.0.0', port=5000, debug=False)
+    app.run(host='127.0.0.1', port=5000, debug=False)

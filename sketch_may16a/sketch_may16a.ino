@@ -5,6 +5,7 @@
 
 #include <SoftwareSerial.h>
 #include <DHT.h>
+#include "secrets.h"
 
 // ---------------- DHT11 ----------------
 #define DHTPIN 2
@@ -19,16 +20,16 @@ const int ALERT_PIN = 7;
 // ---------------- ESP8266 ----------------
 SoftwareSerial esp8266(10, 11); // RX, TX
 
-String ssid = "HUAWEI nova 5T";
-String password = "24445678";
+// WiFi and device-token values belong in the ignored local secrets.h file.
 
 // SERVER
 String host = "192.168.43.178";
 
 // ---------------- THRESHOLDS ----------------
-const float MIN_HUM = 85.0;
-const float MAX_HUM = 90.0;
-const float MAX_TEMP = 30.0;
+float minHumidity = 70.0;
+float maxHumidity = 85.0;
+float minTemperature = 24.0;
+float maxTemperature = 28.0;
 
 // Dashboard control states
 int dashboardFanState = 0;
@@ -80,28 +81,30 @@ void loop() {
   int alertState = 0;
 
   // ---------------- TEMP RULE ----------------
-  if (temperature > MAX_TEMP) {
+  if (temperature > maxTemperature) {
     finalFan = 1;
     alertState = 1;
     Serial.println("[OVERRIDE] HIGH TEMP -> FAN ON");
+  } else if (temperature < minTemperature) {
+    alertState = 1;
+    Serial.println("[ALERT] LOW TEMP");
   } else {
     finalFan = dashboardFanState;
   }
 
   // ---------------- HUMIDITY RULE ----------------
-  if (humidity < MIN_HUM) {
+  if (humidity < minHumidity) {
     finalPump = 1;
     alertState = 1;
     Serial.println("[OVERRIDE] LOW HUM -> PUMP ON");
 
-  } else if (humidity > MAX_HUM) {
+  } else if (humidity > maxHumidity) {
     finalPump = 0;
-    finalFan = 1;
     alertState = 1;
-    Serial.println("[OVERRIDE] HIGH HUM -> FAN ON");
+    Serial.println("[ALERT] HIGH HUM");
 
   } else {
-    finalPump = dashboardPumpState;
+    finalPump = 0;
   }
 
   digitalWrite(FAN_PIN, finalFan);
@@ -129,7 +132,7 @@ void connectWiFi() {
   esp8266.println("AT+CWMODE=1");
   delay(1500);
 
-  String cmd = "AT+CWJAP=\"" + ssid + "\",\"" + password + "\"";
+  String cmd = "AT+CWJAP=\"" + String(BIOSYNC_WIFI_SSID) + "\",\"" + String(BIOSYNC_WIFI_PASSWORD) + "\"";
   esp8266.println(cmd);
 
   delay(10000);
@@ -142,13 +145,15 @@ void connectWiFi() {
 // ==========================================================
 void sendDataToServer(float temp, float hum) {
 
-  String url = "/mushroomsystem/api_update.php?temp=" +
-               String(temp) + "&hum=" + String(hum);
+  String body = "temp=" + String(temp, 1) + "&hum=" + String(hum, 1);
 
   String request =
-    "GET " + url + " HTTP/1.1\r\n" +
+    "POST /mushroomsystem/api_update.php HTTP/1.1\r\n" +
     "Host: " + host + "\r\n" +
-    "Connection: close\r\n\r\n";
+    "X-Device-Token: " + String(BIOSYNC_DEVICE_TOKEN) + "\r\n" +
+    "Content-Type: application/x-www-form-urlencoded\r\n" +
+    "Content-Length: " + String(body.length()) + "\r\n" +
+    "Connection: close\r\n\r\n" + body;
 
   Serial.println("Connecting to server...");
 
@@ -230,6 +235,11 @@ if (fanIndex != -1 && pumpIndex != -1) {
   dashboardFanState = fanValue;
   dashboardPumpState = pumpValue;
 
+  minTemperature = responseFloat(response, "MIN_TEMP=", minTemperature);
+  maxTemperature = responseFloat(response, "MAX_TEMP=", maxTemperature);
+  minHumidity = responseFloat(response, "MIN_HUM=", minHumidity);
+  maxHumidity = responseFloat(response, "MAX_HUM=", maxHumidity);
+
   Serial.println("DASHBOARD SYNC OK");
   Serial.print("FAN=");
   Serial.print(dashboardFanState);
@@ -243,4 +253,15 @@ if (fanIndex != -1 && pumpIndex != -1) {
   // ---------------- CLOSE ----------------
   esp8266.println("AT+CIPCLOSE");
   delay(500);
-}       
+}
+
+float responseFloat(String response, String key, float fallback) {
+  int start = response.indexOf(key);
+  if (start < 0) return fallback;
+  start += key.length();
+  int end = response.indexOf(',', start);
+  int lineEnd = response.indexOf('\r', start);
+  if (end < 0 || (lineEnd >= 0 && lineEnd < end)) end = lineEnd;
+  if (end < 0) end = response.length();
+  return response.substring(start, end).toFloat();
+}

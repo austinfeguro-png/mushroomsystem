@@ -33,12 +33,12 @@ flowchart TB
     end
 
     DHT --> ESP
-    ESP -->|"GET api_update.php?temp=&hum= (every cycle)"| API
+    ESP -->|"Authenticated POST temp + hum (every cycle)"| API
     API -->|"reads current_stage + thresholds<br/>reads/writes last_sms_sent"| DB
     API -->|"sensor_logs (value, timestamp, stage)"| DB
     API -->|"devices.current_state<br/>Temp/Hum/Fan/Pump"| DB
     API -->|"notifications (alert, stage_reminder)"| DB
-    API -->|"CMD:FAN=n,PUMP=n"| ESP
+    API -->|"CMD:FAN=n,PUMP=n + stage thresholds"| ESP
     ESP --> FAN
     ESP --> PUMP
     ESP --> LED
@@ -62,8 +62,9 @@ flowchart TB
 |---|---|---|
 | `FAN=1` | Temp **above max** (fan ON cools) — or **below min** (design question: no heater) | Relay pin 5 HIGH |
 | `FAN=0` | Temp inside stage band | Relay pin 5 LOW |
-| `PUMP=1` | Humidity **outside** min–max band | Relay pin 6 HIGH |
-| `PUMP=0` | Humidity inside band | Relay pin 6 LOW |
+| `PUMP=1` | Humidity below stage minimum | Relay pin 6 HIGH |
+| `PUMP=0` | Humidity at or above stage minimum | Relay pin 6 LOW |
+| `FAN=1` | Temperature outside band or humidity above stage maximum | Relay pin 5 HIGH |
 
 ---
 
@@ -80,9 +81,9 @@ sequenceDiagram
     participant SET as system_settings
 
     DHT->>ESP: read temp + humidity
-    ESP->>API: GET ?temp=27.4&hum=86.2
-    API->>API: validate ranges (-10..60 C, 0..100 %)
-    alt invalid or missing values
+    ESP->>API: POST temp=27.4&hum=86.2 + X-Device-Token
+    API->>API: verify token + validate numeric ranges (-10..60 C, 0..100 %)
+    alt missing token or invalid values
         API-->>ESP: CMD:FAN=0,PUMP=0 (safe state)
     end
     API->>SET: read current_stage + {stage}_min/max_temp, _min/max_hum
@@ -90,7 +91,7 @@ sequenceDiagram
     API->>DB: INSERT sensor_logs (temp, NOW(), stage)
     API->>DB: INSERT sensor_logs (hum, NOW(), stage)
     API->>DB: UPDATE devices (Temp Node, Hum Node)
-    API->>API: fan = temp>max OR temp<min<br/>pump = hum<min OR hum>max
+    API->>API: fan = temp outside band OR hum>max<br/>pump = hum<min
     API->>DB: UPDATE devices (Fan, Pump)
     alt any threshold breached
         API->>NOTIF: last alert > 5 min ago?
@@ -99,10 +100,10 @@ sequenceDiagram
     end
     opt stage duration reached
         API->>SET: days_passed >= stage_expected_days?
-        API->>NOTIF: INSERT one unread stage_reminder (idempotent)
+        API->>NOTIF: INSERT one stage_reminder per stage period
     end
-    API-->>ESP: CMD:FAN=1,PUMP=0
-    ESP->>ESP: parse FAN= / PUMP= → drive pins
+    API-->>ESP: CMD:FAN=1,PUMP=0 + active thresholds
+    ESP->>ESP: update local thresholds, parse FAN= / PUMP=, drive pins
 ```
 
 ## 3. Sequence Diagram — Dashboard Poll + ML Prediction (every 5 s)

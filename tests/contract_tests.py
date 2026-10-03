@@ -115,10 +115,25 @@ check("api_update echoes CMD:FAN=,PUMP=", "CMD:FAN={$fanState},PUMP={$pumpState}
 check("Arduino parses FAN= and PUMP=", '"FAN="' in sketch and '"PUMP="' in sketch)
 check("api_update validates sensor ranges",
       "$temperature < -10" in api and "$humidity < 0 || $humidity > 100" in api)
+check("api_update requires POST, a configured device token, and numeric values",
+      "$_SERVER['REQUEST_METHOD'] !== 'POST'" in api
+      and "getenv('BIOSYNC_DEVICE_TOKEN')" in api
+      and "is_numeric($temperatureRaw)" in api
+      and "is_numeric($humidityRaw)" in api)
+check("Arduino sends authenticated form-encoded POST data",
+      '"POST /mushroomsystem/api_update.php HTTP/1.1' in sketch
+      and '"X-Device-Token: "' in sketch
+      and '"Content-Type: application/x-www-form-urlencoded' in sketch)
+check("server actuator rules turn fan on for high humidity and pump on only for low humidity",
+      "$humidity > $MAX_HUM" in api.split("$fanState", 1)[1].split("try {", 1)[0]
+      and "$pumpState = $humidity < $MIN_HUM ? 1 : 0;" in api)
 check("api_update inserts stage column into sensor_logs",
       "INSERT INTO sensor_logs (device_id, recorded_value, recorded_at, stage)" in api)
 check("sketch posts to /mushroomsystem/api_update.php",
       "/mushroomsystem/api_update.php" in sketch)
+check("Arduino updates its local safety thresholds from the selected stage",
+      all(f'responseFloat(response, "{key}="' in sketch
+          for key in ["MIN_TEMP", "MAX_TEMP", "MIN_HUM", "MAX_HUM"]))
 
 # -------------------------------------------------------------
 print("=== 6. Stage system consistency (thresholds in all 3 places) ===")
@@ -182,8 +197,11 @@ check("dashboard.php low-temperature alert check",
       "$temperature < $MIN_TEMP" in dash,
       "api_update alerts on low temp but dashboard alert banner ignores it (fan-only rule)")
 check("api_update alerts on low temp", "$temperature < $MIN_TEMP" in api)
-check("api_update stage reminder is idempotent",
-      "SELECT COUNT(*) FROM notifications" in api and "stage_reminder" in api)
+check("stage reminder deduplication includes already-read reminders",
+      bool(re.search(r"WHERE type\s*=\s*'stage_reminder'\s+AND created_at\s*>=\s*:since", api))
+      and not bool(re.search(r"WHERE type\s*=\s*'stage_reminder'\s+AND is_read\s*=\s*0", api)))
+check("live_data requires an authenticated session before returning data",
+      "if (!isset($_SESSION['user_id']))" in live and "Authentication required." in live)
 
 # -------------------------------------------------------------
 print("=== 9. ML pipeline contracts ===")
@@ -197,6 +215,10 @@ check("prediction_api loads biosync_models.pkl (dict)", "biosync_models.pkl" in 
 check("prediction_api falls back to best model if algo missing", "Graceful fallback" in pred)
 check("prediction_api rate limit present", "is_rate_limited" in pred and "RATE_LIMIT" in pred)
 check("prediction_api validates ranges like api_update", "temp < -10 or temp > 60" in pred)
+check("prediction_api falls back to legacy singular model artifact",
+      "biosync_model.pkl" in pred and "Legacy Model" in pred)
+check("KNN scales temperature and humidity features",
+      "StandardScaler" in train and "make_pipeline" in train)
 
 # -------------------------------------------------------------
 print("=== 10. Config consolidation ===")
