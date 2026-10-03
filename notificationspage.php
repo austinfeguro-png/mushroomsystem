@@ -3,6 +3,9 @@
 // 1. START SESSION & CHECK LOGIN
 // ==========================================
 session_start();
+if (empty($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+}
 if (!isset($_SESSION['user_id'])) {
     header("Location: index.php");
     exit();
@@ -23,6 +26,11 @@ $pdo = getDB();
 // ==========================================
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax_action'])) {
     header('Content-Type: application/json');
+    if (!hash_equals($_SESSION['csrf_token'], (string)($_POST['csrf_token'] ?? ''))) {
+        http_response_code(403);
+        echo json_encode(['success' => false, 'error' => 'Invalid security token']);
+        exit();
+    }
 
     // Mark single notification as read
     if ($_POST['ajax_action'] === 'mark_read') {
@@ -56,6 +64,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax_action'])) {
 
     // Delete all read notifications
     if ($_POST['ajax_action'] === 'delete_all_read') {
+        if (!$isAdmin) { echo json_encode(['success'=>false,'error'=>'Unauthorized']); exit; }
         $pdo->query("DELETE FROM notifications WHERE is_read = 1");
         echo json_encode(['success' => true]);
         exit();
@@ -210,6 +219,7 @@ foreach ($notifications as $n) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="<?php echo htmlspecialchars($_SESSION['csrf_token'], ENT_QUOTES, 'UTF-8'); ?>">
     <title>Notifications — Bio-Sync</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 
@@ -1108,6 +1118,7 @@ themeBtn.addEventListener('click', () => applyTheme(!document.body.classList.con
 // ================================================
 function post(data) {
     const fd = new FormData();
+    fd.append('csrf_token', document.querySelector('meta[name="csrf-token"]').content);
     for (const [k, v] of Object.entries(data)) fd.append(k, v);
     return fetch('notificationspage.php', { method: 'POST', body: fd }).then(r => r.json());
 }

@@ -1,5 +1,8 @@
 <?php
 session_start();
+if (empty($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+}
 if (!isset($_SESSION['user_id'])) { header("Location: index.php"); exit(); }
 if (!isset($_SESSION['user_role']) || strtolower($_SESSION['user_role']) !== 'admin') { header("Location: dashboard.php"); exit(); }
 $userName = $_SESSION['user_name'];
@@ -8,8 +11,21 @@ $userName = $_SESSION['user_name'];
 require_once 'config.php';
 $pdo = getDB();
 
+function jsArg($value) {
+    return htmlspecialchars(
+        json_encode($value, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT),
+        ENT_QUOTES,
+        'UTF-8'
+    );
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax_action'])) {
     header('Content-Type: application/json');
+    if (!hash_equals($_SESSION['csrf_token'], (string)($_POST['csrf_token'] ?? ''))) {
+        http_response_code(403);
+        echo json_encode(['success' => false, 'error' => 'Invalid security token']);
+        exit();
+    }
 
     if ($_POST['ajax_action'] === 'save_user') {
         $id       = $_POST['user_id'];
@@ -107,6 +123,7 @@ $stage       = $settings['current_stage'] ?? 'colonization';
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="<?php echo htmlspecialchars($_SESSION['csrf_token'], ENT_QUOTES, 'UTF-8'); ?>">
     <title>User Management — Bio-Sync</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
@@ -394,11 +411,11 @@ $stage       = $settings['current_stage'] ?? 'colonization';
                                 <td>
                                     <div class="action-btns">
                                         <button class="btn-icon" title="Edit"
-                                            onclick="openEditModal('<?php echo $u['id']; ?>','<?php echo addslashes($u['full_name']); ?>','<?php echo addslashes($u['username']); ?>','<?php echo addslashes($u['phone']??''); ?>','<?php echo $u['role']; ?>','<?php echo $u['status']; ?>')">
+                                            onclick="openEditModal(<?php echo (int)$u['id']; ?>,<?php echo jsArg($u['full_name']); ?>,<?php echo jsArg($u['username']); ?>,<?php echo jsArg($u['phone'] ?? ''); ?>,<?php echo jsArg($u['role']); ?>,<?php echo jsArg($u['status']); ?>)">
                                             <i class="fa-solid fa-pen"></i>
                                         </button>
                                         <button class="btn-icon del" title="Delete"
-                                            onclick="openDeleteModal('<?php echo $u['id']; ?>','<?php echo addslashes($u['full_name']); ?>')">
+                                            onclick="openDeleteModal(<?php echo (int)$u['id']; ?>,<?php echo jsArg($u['full_name']); ?>)">
                                             <i class="fa-solid fa-trash"></i>
                                         </button>
                                     </div>
@@ -602,6 +619,7 @@ function saveUser() {
     if (!id && !password)   { alert('Password is required for new users.'); return; }
 
     const fd = new FormData();
+    fd.append('csrf_token', document.querySelector('meta[name="csrf-token"]').content);
     fd.append('ajax_action','save_user');
     fd.append('user_id',id); fd.append('full_name',name); fd.append('username',username);
     fd.append('phone',phone); fd.append('role',role); fd.append('status',status); fd.append('password',password);
@@ -620,6 +638,7 @@ function openDeleteModal(id, name) {
 function closeDeleteModal() { document.getElementById('deleteModal').classList.remove('open'); }
 function confirmDelete() {
     const fd = new FormData();
+    fd.append('csrf_token', document.querySelector('meta[name="csrf-token"]').content);
     fd.append('ajax_action','delete_user');
     fd.append('user_id', document.getElementById('deleteUserId').value);
     fetch('usermanagement.php', { method:'POST', body:fd })
@@ -638,6 +657,7 @@ document.getElementById('saveSettings').addEventListener('click', () => {
     const btn = document.getElementById('saveSettings');
     btn.textContent = 'Saving...'; btn.disabled = true;
     const fd = new FormData();
+    fd.append('csrf_token', document.querySelector('meta[name="csrf-token"]').content);
     fd.append('ajax_action','save_settings');
     fd.append('temp_unit', document.getElementById('tempUnit').value);
     fd.append('email_notif', document.getElementById('emailNotif').checked ? '1' : '0');
