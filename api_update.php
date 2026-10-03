@@ -141,7 +141,7 @@ if ($isAbnormal) {
     try {
         $lastStmt  = $pdo->query("
             SELECT created_at FROM notifications
-            WHERE type != 'stage_reminder'
+            WHERE type = 'alert'
             ORDER BY created_at DESC LIMIT 1
         ");
         $lastRow   = $lastStmt->fetch();

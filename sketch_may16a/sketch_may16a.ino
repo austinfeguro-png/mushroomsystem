@@ -65,6 +65,10 @@ void loop() {
 
   if (isnan(humidity) || isnan(temperature)) {
     Serial.println("DHT22 SENSOR FAILED!");
+    digitalWrite(FAN_PIN, LOW);
+    digitalWrite(PUMP_PIN, LOW);
+    digitalWrite(ALERT_PIN, HIGH);
+    Serial.println("[FAILSAFE] FAN OFF, PUMP OFF, ALERT ON");
     delay(2000);
     return;
   }

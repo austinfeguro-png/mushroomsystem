@@ -14,18 +14,34 @@ PRODUCES:
     ml_results.json     — accuracy / precision / recall table
 =============================================================
 """
-import json, pickle
+import json, os, pickle
 import pandas as pd
 import mysql.connector
 from sklearn.tree            import DecisionTreeClassifier
 from sklearn.ensemble        import RandomForestClassifier
 from sklearn.neighbors       import KNeighborsClassifier
-from sklearn.preprocessing   import StandardScaler
+from sklearn.compose         import ColumnTransformer
+from sklearn.preprocessing   import OneHotEncoder, StandardScaler
 from sklearn.pipeline        import make_pipeline
 from sklearn.model_selection import train_test_split
 from sklearn.metrics         import accuracy_score, precision_score, recall_score
 
-DB = dict(host='localhost', user='root', password='', database='biosync_db')
+def database_config():
+    profile = os.environ.get('BIOSYNC_DB_PROFILE', 'local').strip().lower()
+    if profile not in ('local', 'online'):
+        raise SystemExit("BIOSYNC_DB_PROFILE must be 'local' or 'online'.")
+
+    prefix = 'BIOSYNC_' + profile.upper() + '_DB_'
+    names = {'host': 'HOST', 'user': 'USER', 'password': 'PASSWORD', 'database': 'NAME'}
+    config = {key: os.environ.get(prefix + suffix, '').strip()
+              for key, suffix in names.items()}
+    missing = [prefix + suffix for key, suffix in names.items() if not config[key]]
+    if missing:
+        raise SystemExit('Missing database settings: ' + ', '.join(missing))
+    return config
+
+
+DB = database_config()
 
 # Stage-specific thresholds from RRL Table 1
 STAGE_THRESHOLDS = {
@@ -135,7 +151,7 @@ if use_balanced:
 else:
     print(f"      Class balance OK (ratio {ratio:.1f}x — threshold 5x).")
 
-X = df[['temperature','humidity']]
+X = df[['temperature','humidity','stage']]
 y = df['condition']
 
 X_train, X_test, y_train, y_test = train_test_split(
@@ -146,17 +162,32 @@ X_train, X_test, y_train, y_test = train_test_split(
 # Train all 3 models with optional balanced weighting
 # ----------------------------------------------------------
 print("[5/7] Training all 3 models ...")
+def make_preprocessor():
+    return ColumnTransformer([
+        ('stage', OneHotEncoder(handle_unknown='ignore'), ['stage']),
+        ('measurements', StandardScaler(), ['temperature', 'humidity']),
+    ])
+
+
 models_to_train = {
-    'Decision Tree': DecisionTreeClassifier(
-        random_state=42,
-        class_weight='balanced' if use_balanced else None
+    'Decision Tree': make_pipeline(
+        make_preprocessor(),
+        DecisionTreeClassifier(
+            random_state=42,
+            class_weight='balanced' if use_balanced else None
+        )
     ),
-    'Random Forest': RandomForestClassifier(
-        n_estimators=100, random_state=42,
-        class_weight='balanced' if use_balanced else None
+    'Random Forest': make_pipeline(
+        make_preprocessor(),
+        RandomForestClassifier(
+            n_estimators=100, random_state=42,
+            class_weight='balanced' if use_balanced else None
+        )
     ),
-    # Scale temperature and humidity so their different units do not bias distance.
-    'KNN'          : make_pipeline(StandardScaler(), KNeighborsClassifier(n_neighbors=5)),
+    'KNN'          : make_pipeline(
+        make_preprocessor(),
+        KNeighborsClassifier(n_neighbors=5)
+    ),
 }
 
 if use_balanced:

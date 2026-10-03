@@ -1,6 +1,66 @@
 <?php
 // Ensure absolutely nothing (no spaces or empty lines) comes before this <?php tag
 session_start();
+if (empty($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+}
+
+function loginAttemptFilePath() {
+    $remoteAddress = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+    return sys_get_temp_dir() . DIRECTORY_SEPARATOR
+        . 'biosync-login-' . hash('sha256', $remoteAddress) . '.json';
+}
+
+function reserveLoginAttempt() {
+    $handle = @fopen(loginAttemptFilePath(), 'c+');
+    if ($handle === false || !flock($handle, LOCK_EX)) {
+        if ($handle !== false) fclose($handle);
+        return -1;
+    }
+
+    $state = json_decode(stream_get_contents($handle), true);
+    $attempts = [];
+    if (isset($state['attempts']) && is_array($state['attempts'])) {
+        foreach ($state['attempts'] as $attempt) {
+            if (is_numeric($attempt) && (int)$attempt > time() - 900) {
+                $attempts[] = (int)$attempt;
+            }
+        }
+    }
+
+    $now = time();
+    if (count($attempts) >= 5) {
+        $retryAfter = max(1, 900 - ($now - min($attempts)));
+        flock($handle, LOCK_UN);
+        fclose($handle);
+        return $retryAfter;
+    }
+
+    $attempts[] = $now;
+    $payload = json_encode(['attempts' => $attempts]);
+    rewind($handle);
+    $truncated = ftruncate($handle, 0);
+    $written = $payload !== false && $truncated && fwrite($handle, $payload) === strlen($payload);
+    fflush($handle);
+    flock($handle, LOCK_UN);
+    fclose($handle);
+
+    return $written ? 0 : -1;
+}
+
+function clearLoginAttempts() {
+    $handle = @fopen(loginAttemptFilePath(), 'c+');
+    if ($handle === false || !flock($handle, LOCK_EX)) {
+        if ($handle !== false) fclose($handle);
+        return;
+    }
+    rewind($handle);
+    ftruncate($handle, 0);
+    fwrite($handle, '{"attempts":[]}');
+    fflush($handle);
+    flock($handle, LOCK_UN);
+    fclose($handle);
+}
 
 // ==========================================
 // 1. DATABASE CONNECTION (shared config.php)
@@ -16,37 +76,44 @@ $error_message = "";
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
     // --- LOGIN LOGIC ---
     if (isset($_POST['action']) && $_POST['action'] == 'login') {
-        
-        // CHANGED: Look for a username instead of an email
-        $username = trim($_POST['username'] ?? '');
-        $password = $_POST['password'] ?? '';
-
-        // Fetch user from the database using the username column
-        $stmt = $pdo->prepare("SELECT * FROM users WHERE username = :username LIMIT 1");
-        $stmt->execute(['username' => $username]);  
-        $user = $stmt->fetch(PDO::FETCH_ASSOC);
-
-        // Verify user exists AND password is correct
-        if ($user && password_verify($password, $user['password_hash'])) {
-            
-            // Check if the user's account status is active
-            if (isset($user['status']) && strtolower($user['status']) === 'inactive') {
-                $error_message = "Your account has been deactivated. Please contact an administrator.";
-            } else {
-                // Setup Session variables
-                session_regenerate_id(true);
-                $_SESSION['user_id'] = $user['id'];
-                $_SESSION['user_name'] = $user['full_name'];
-                $_SESSION['user_role'] = strtolower($user['role']); // Save role in lowercase for consistent admin checks
-                
-                // Redirect to Dashboard
-                header("Location: dashboard.php");
-                exit();
-            }
-            
+        if (!hash_equals($_SESSION['csrf_token'], (string)($_POST['csrf_token'] ?? ''))) {
+            http_response_code(403);
+            $error_message = "Invalid security token. Reload the page and try again.";
         } else {
-            // CHANGED: Updated error message text
-            $error_message = "Invalid username or password.";
+            $rateLimitWait = reserveLoginAttempt();
+            if ($rateLimitWait < 0) {
+                http_response_code(503);
+                $error_message = "Login is temporarily unavailable. Please try again later.";
+            } elseif ($rateLimitWait > 0) {
+                http_response_code(429);
+                $error_message = "Too many login attempts. Please wait "
+                    . (int)ceil($rateLimitWait / 60) . " minute(s) and try again.";
+            } else {
+                $username = trim($_POST['username'] ?? '');
+                $password = $_POST['password'] ?? '';
+
+                $stmt = $pdo->prepare("SELECT * FROM users WHERE username = :username LIMIT 1");
+                $stmt->execute(['username' => $username]);
+                $user = $stmt->fetch(PDO::FETCH_ASSOC);
+
+                if ($user && password_verify($password, $user['password_hash'])) {
+                    if (isset($user['status']) && strtolower($user['status']) === 'inactive') {
+                        $error_message = "Your account has been deactivated. Please contact an administrator.";
+                    } else {
+                        clearLoginAttempts();
+                        session_regenerate_id(true);
+                        $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+                        $_SESSION['user_id'] = $user['id'];
+                        $_SESSION['user_name'] = $user['full_name'];
+                        $_SESSION['user_role'] = strtolower($user['role']);
+
+                        header("Location: dashboard.php");
+                        exit();
+                    }
+                } else {
+                    $error_message = "Invalid username or password.";
+                }
+            }
         }
     }
 }
@@ -121,11 +188,12 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
 <div class="auth-card">
     <?php if(!empty($error_message)): ?>
-        <div class="alert alert-error"><i class="fa-solid fa-circle-exclamation"></i> <?php echo $error_message; ?></div>
+        <div class="alert alert-error"><i class="fa-solid fa-circle-exclamation"></i> <?php echo htmlspecialchars($error_message, ENT_QUOTES, 'UTF-8'); ?></div>
     <?php endif; ?>
 
     <form action="<?php echo htmlspecialchars($_SERVER["PHP_SELF"]); ?>" method="POST">
         <input type="hidden" name="action" value="login">
+        <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf_token'], ENT_QUOTES, 'UTF-8'); ?>">
 
         <div class="form-group">
             <label class="form-label" for="login-username">Your username</label>

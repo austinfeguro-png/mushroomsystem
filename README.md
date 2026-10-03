@@ -83,6 +83,11 @@ python train_models.py     # requires ≥50 paired sensor readings in the DB
 python prediction_api.py   # keep running while the dashboard is open (port 5000)
 ```
 
+Before training, select `BIOSYNC_DB_PROFILE=local` or `online` and set that profile's
+`BIOSYNC_<PROFILE>_DB_HOST`, `_DB_NAME`, `_DB_USER`, and `_DB_PASSWORD` environment
+variables. Use a database account with read-only access to the trainer's source tables;
+do not put database credentials in the repository.
+
 ### 3. Arduino hardware
 
 | Component                    | Pin                      |

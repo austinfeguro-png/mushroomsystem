@@ -15,9 +15,10 @@ GET /metrics
 GET /health
 =============================================================
 """
-import json, pickle, time
+import json, math, pickle, time
 from collections import defaultdict
 from flask import Flask, request, jsonify
+import pandas as pd
 
 app        = Flask(__name__)
 models     = {}
@@ -80,15 +81,18 @@ def predict():
     if is_rate_limited(ip):
         return jsonify({'error': 'Rate limit exceeded. Max 60 requests/minute.'}), 429
 
-    if not models:
-        return jsonify({'error': 'No models loaded. Run train_models.py first.'}), 500
+    # Require finite sensor values in the supported ranges.
+    if 'temp' not in request.args or 'hum' not in request.args:
+        return jsonify({'error': 'Both temp and hum parameters are required.'}), 400
 
-    # Validate parameters
     try:
-        temp  = float(request.args.get('temp', 0))
-        hum   = float(request.args.get('hum',  0))
+        temp  = float(request.args['temp'])
+        hum   = float(request.args['hum'])
     except (ValueError, TypeError):
         return jsonify({'error': 'Invalid temp or hum value.'}), 400
+
+    if not math.isfinite(temp) or not math.isfinite(hum):
+        return jsonify({'error': 'Temperature and humidity must be finite numbers.'}), 400
 
     # Input range guard — same as api_update.php
     if temp < -10 or temp > 60:
@@ -96,8 +100,13 @@ def predict():
     if hum < 0 or hum > 100:
         return jsonify({'error': f'Humidity {hum} out of valid range (0 to 100).'}), 400
 
-    algo  = request.args.get('algo',  'Random Forest')
+    algo  = request.args.get('algo', 'Random Forest')
     stage = request.args.get('stage', 'fruiting')
+    if stage not in STAGE_THRESHOLDS:
+        return jsonify({'error': 'Unknown growth stage.'}), 400
+
+    if not models:
+        return jsonify({'error': 'No models loaded. Run train_models.py first.'}), 500
 
     # Graceful fallback if algo not found
     model = models.get(algo)
@@ -106,8 +115,17 @@ def predict():
         model = models.get(best) or list(models.values())[0]
         algo  = best
 
-    condition  = model.predict([[temp, hum]])[0]
-    proba      = model.predict_proba([[temp, hum]])[0]
+    features = pd.DataFrame([{
+        'temperature': temp,
+        'humidity': hum,
+        'stage': stage,
+    }])
+    try:
+        condition = model.predict(features)[0]
+        proba = model.predict_proba(features)[0]
+    except (ValueError, AttributeError):
+        app.logger.exception('Loaded model artifact is incompatible with stage-aware inputs.')
+        return jsonify({'error': 'Model artifact is outdated. Run train_models.py to retrain it.'}), 503
     confidence = round(float(max(proba)) * 100, 2)
 
     # Stage threshold context
