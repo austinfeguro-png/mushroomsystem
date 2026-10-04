@@ -108,6 +108,13 @@ check("dashboard defines $settings before include (FETCH_KEY_PAIR)",
       "$settings" in dash and "fetchAll(PDO::FETCH_KEY_PAIR)" in dash)
 check("ml_widget reads $settings fallbacks",
       "$settings['active_ml_algorithm']" in mlw and "$settings['current_stage']" in mlw)
+check("ml_widget shows only live classification, not training metrics",
+      "Current Condition" in mlw
+      and "Algorithm Performance Comparison" not in mlw
+      and "http://127.0.0.1:5000/metrics" not in mlw)
+check("ml_widget retains algorithm and stage details in its header",
+      "Algorithm: <strong><?= htmlspecialchars($ml_algo) ?>" in mlw
+      and "Stage: <strong><?= htmlspecialchars($ml_stage_label) ?>" in mlw)
 
 # -------------------------------------------------------------
 print("=== 5. api_update.php <-> Arduino sketch contract ===")

@@ -14,18 +14,15 @@ $stageLabelMap = ['colonization'=>'Colonization','pinning'=>'Pinning Initiation'
 $ml_stage_label = $stageLabelMap[$ml_stage] ?? ucfirst($ml_stage);
 
 $predData    = null;
-$metricsData = null;
 $ml_error    = null;
 
 $ctx = stream_context_create(['http' => ['timeout' => 2]]);
 $predRaw    = @file_get_contents("http://127.0.0.1:5000/predict?temp={$ml_temp}&hum={$ml_hum}&algo=" . urlencode($ml_algo) . "&stage=" . urlencode($ml_stage), false, $ctx);
-$metricsRaw = @file_get_contents("http://127.0.0.1:5000/metrics", false, $ctx);
 
-if ($predRaw === false || $metricsRaw === false) {
+if ($predRaw === false) {
     $ml_error = "ML Prediction API is offline. Open a terminal in the biosync_ml folder and run: python prediction_api.py";
 } else {
-    $predData    = json_decode($predRaw,    true);
-    $metricsData = json_decode($metricsRaw, true);
+    $predData = json_decode($predRaw, true);
 }
 
 $palette = [
@@ -36,7 +33,6 @@ $palette = [
 
 $condition  = $predData['condition']  ?? 'Unknown';
 $confidence = $predData['confidence'] ?? 0;
-$bestModel  = $metricsData['best_model'] ?? 'N/A';
 $style      = $palette[$condition] ?? ['class'=>'ml-badge-normal','icon'=>'&#10067;'];
 ?>
 
@@ -75,14 +71,6 @@ body.dark .ml-badge-critical { background: #1f0505; border-color: #991b1b; color
     gap: 10px;
 }
 body.dark .ml-offline { background: #1c1700; color: #fde68a; border-color: #854d0e; }
-
-.ml-algo-table { width:100%; border-collapse:collapse; font-size:13px; border-radius:8px; overflow:hidden; }
-.ml-algo-table th { padding:10px 16px; font-weight:600; background:var(--primary); color:#fff; }
-.ml-algo-table td { padding:10px 16px; color:var(--text-main); border-bottom: 1px solid var(--border-color); }
-.ml-algo-table tr:last-child td { border-bottom: none; }
-.ml-algo-table tbody tr:nth-child(odd)  { background: var(--card-bg); }
-.ml-algo-table tbody tr:nth-child(even) { background: var(--bg-body); }
-.ml-algo-table tbody tr:hover           { background: var(--border-color); }
 </style>
 
 <div class="card-head" style="margin-bottom:14px;">
@@ -117,44 +105,5 @@ body.dark .ml-offline { background: #1c1700; color: #fde68a; border-color: #854d
         </div>
         <div class="ml-badge-icon"><?= $style['icon'] ?? '&#10067;' ?></div>
     </div>
-
-    <!-- ALGORITHM COMPARISON TABLE -->
-    <?php if (!empty($metricsData['results'])): ?>
-    <div style="font-size:13px;font-weight:600;margin-bottom:10px;color:var(--text-main);">
-        Algorithm Performance Comparison
-    </div>
-    <div style="overflow-x:auto;">
-        <table class="ml-algo-table">
-            <thead>
-                <tr>
-                    <th style="padding:10px 16px;text-align:left;font-weight:600;">Algorithm</th>
-                    <th style="padding:10px 16px;text-align:center;font-weight:600;">Accuracy</th>
-                    <th style="padding:10px 16px;text-align:center;font-weight:600;">Precision</th>
-                    <th style="padding:10px 16px;text-align:center;font-weight:600;">Recall</th>
-                </tr>
-            </thead>
-            <tbody>
-                <?php
-                $rows = ['var(--card-bg)','var(--bg-body)']; $i = 0;
-                foreach ($metricsData['results'] as $algo => $m):
-                    $isBest = ($algo === $bestModel);
-                ?>
-                <tr class="<?= $isBest ? 'ml-best-row' : '' ?>" style="<?= $isBest ? 'font-weight:600;' : '' ?>">
-                    <td style="padding:10px 16px;color:var(--text-main);">
-                        <?= htmlspecialchars($algo) ?>
-                        <?php if ($isBest): ?>
-                            <span style="background:var(--primary);color:#fff;font-size:10px;
-                                         padding:2px 7px;border-radius:10px;margin-left:6px;">Best</span>
-                        <?php endif; ?>
-                    </td>
-                    <td style="padding:10px 16px;text-align:center;color:var(--text-main);"><?= $m['accuracy']  ?>%</td>
-                    <td style="padding:10px 16px;text-align:center;color:var(--text-main);"><?= $m['precision'] ?>%</td>
-                    <td style="padding:10px 16px;text-align:center;color:var(--text-main);"><?= $m['recall']    ?>%</td>
-                </tr>
-                <?php $i++; endforeach; ?>
-            </tbody>
-        </table>
-    </div>
-    <?php endif; ?>
 
 <?php endif; ?>
