@@ -103,9 +103,10 @@ void loop() {
     Serial.println("[OVERRIDE] LOW HUM -> PUMP ON");
 
   } else if (humidity > maxHumidity) {
+    finalFan = 1;
     finalPump = 0;
     alertState = 1;
-    Serial.println("[ALERT] HIGH HUM");
+    Serial.println("[OVERRIDE] HIGH HUM -> FAN ON");
 
   } else {
     finalPump = 0;

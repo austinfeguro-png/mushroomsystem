@@ -111,7 +111,7 @@ try {
 // ----------------------------------------------------------
 // 5. THRESHOLD CHECK → UPDATE FAN & PUMP STATES
 // ----------------------------------------------------------
-$fanState  = $temperature > $MAX_TEMP ? 1 : 0;
+$fanState  = ($temperature > $MAX_TEMP || $humidity > $MAX_HUM) ? 1 : 0;
 $pumpState = $humidity < $MIN_HUM ? 1 : 0;
 
 try {
