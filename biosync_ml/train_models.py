@@ -14,7 +14,8 @@ PRODUCES:
     ml_results.json     — accuracy / precision / recall table
 =============================================================
 """
-import json, os, pickle
+import json, os, pickle, re
+from pathlib import Path
 import pandas as pd
 import mysql.connector
 from sklearn.tree            import DecisionTreeClassifier
@@ -35,7 +36,27 @@ def database_config():
     names = {'host': 'HOST', 'user': 'USER', 'password': 'PASSWORD', 'database': 'NAME'}
     config = {key: os.environ.get(prefix + suffix, '').strip()
               for key, suffix in names.items()}
-    missing = [prefix + suffix for key, suffix in names.items() if not config[key]]
+
+    if profile == 'local':
+        php_config_path = Path(__file__).resolve().parent.parent / 'config.php'
+        if php_config_path.is_file():
+            php_source = php_config_path.read_text(encoding='utf-8')
+            php_names = {'host': 'DB_HOST', 'user': 'DB_USER',
+                         'password': 'DB_PASS', 'database': 'DB_NAME'}
+            for key, constant in php_names.items():
+                if not config[key]:
+                    match = re.search(
+                        r"define\s*\(\s*['\"]" + constant + r"['\"]\s*,\s*(['\"])(.*?)\1\s*\)",
+                        php_source,
+                    )
+                    if match:
+                        config[key] = match.group(2)
+
+    # Empty local passwords are valid with the default XAMPP setup.
+    missing = [prefix + suffix for key, suffix in names.items()
+               if not config[key] and key != 'password']
+    if not config['password'] and profile == 'online':
+        missing.append(prefix + 'PASSWORD')
     if missing:
         raise SystemExit('Missing database settings: ' + ', '.join(missing))
     return config
@@ -143,7 +164,7 @@ print("[4/7] Checking class balance ...")
 majority = counts.max()
 minority = counts.min()
 ratio    = majority / minority if minority > 0 else 999
-use_balanced = ratio > 5
+use_balanced = bool(ratio > 5)
 
 if use_balanced:
     print(f"  [WARNING] Class imbalance detected ({majority}:{minority} ratio = {ratio:.1f}x).")

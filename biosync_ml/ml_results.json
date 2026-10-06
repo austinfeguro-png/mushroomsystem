@@ -12,9 +12,16 @@
       "recall": 100.0
     },
     "KNN": {
-      "accuracy": 90.91,
-      "precision": 90.91,
-      "recall": 90.91
+      "accuracy": 93.33,
+      "precision": 95.0,
+      "recall": 93.33
     }
-  }
+  },
+  "imbalanced": false,
+  "class_balance": {
+    "Critical": 41,
+    "Warning": 19,
+    "Normal": 14
+  },
+  "total_samples": 74
 }
