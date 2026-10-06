@@ -73,22 +73,26 @@ $MIN_HUM  = (float)($settings["{$stage}_min_hum"]  ?? 70.0);
 $MAX_HUM  = (float)($settings["{$stage}_max_hum"]  ?? 85.0);
 
 // ----------------------------------------------------------
-// 3. LOG SENSOR READINGS TO sensor_logs
+// 3. LOG SENSOR READINGS TO sensor_logs (when requested by the device)
 // ----------------------------------------------------------
-try {
-    $pdo->prepare("
+// Older firmware without `log` keeps the existing behavior.
+$shouldLog = !isset($_POST['log']) || (string)$_POST['log'] !== '0';
+if ($shouldLog) {
+    try {
+        $pdo->prepare("
         INSERT INTO sensor_logs (device_id, recorded_value, recorded_at, stage)
         SELECT id, :val, NOW(), :stage FROM devices
         WHERE device_name = 'Temperature Node 1' LIMIT 1
-    ")->execute(['val' => $temperature, 'stage' => $stage]);
+        ")->execute(['val' => $temperature, 'stage' => $stage]);
 
-    $pdo->prepare("
+        $pdo->prepare("
         INSERT INTO sensor_logs (device_id, recorded_value, recorded_at, stage)
         SELECT id, :val, NOW(), :stage FROM devices
         WHERE device_name = 'Humidity Node 1' LIMIT 1
-    ")->execute(['val' => $humidity, 'stage' => $stage]);
-} catch (PDOException $e) {
-    error_log("BioSync log error: " . $e->getMessage());
+        ")->execute(['val' => $humidity, 'stage' => $stage]);
+    } catch (PDOException $e) {
+        error_log("BioSync log error: " . $e->getMessage());
+    }
 }
 
 // ----------------------------------------------------------

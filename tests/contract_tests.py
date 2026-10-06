@@ -131,6 +131,14 @@ check("Arduino sends authenticated form-encoded POST data",
       '"POST /mushroomsystem/api_update.php HTTP/1.1' in sketch
       and '"X-Device-Token: "' in sketch
       and '"Content-Type: application/x-www-form-urlencoded' in sketch)
+check("firmware requests sensor-log persistence every 10 minutes",
+      "10UL * 60UL * 1000UL" in sketch
+      and "sendDataToServer(temperature, humidity, logReading)" in sketch
+      and '"&log=" + String(logReading ? 1 : 0)' in sketch)
+check("api_update honors firmware log flag while preserving legacy clients",
+      "$shouldLog = !isset($_POST['log']) || (string)$_POST['log'] !== '0';" in api
+      and "if ($shouldLog)" in api
+      and "INSERT INTO sensor_logs (device_id, recorded_value, recorded_at, stage)" in api)
 check("server actuator rules turn fan on for high humidity and pump on only for low humidity",
       "$humidity > $MAX_HUM" in api.split("$fanState", 1)[1].split("try {", 1)[0]
       and "$pumpState = $humidity < $MIN_HUM ? 1 : 0;" in api)

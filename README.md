@@ -4,7 +4,7 @@ Bio-Sync is an IoT system that monitors temperature and humidity in a growing en
 
 ## ✨ Features
 
-- **Live monitoring** — temperature and humidity readings every 3 seconds, auto-refreshing dashboard with Chart.js history graphs
+- **Live monitoring** — local temperature/humidity checks and control every 3 seconds; sensor history is saved every 10 minutes, with the dashboard refreshing every 5 seconds
 - **Automatic control** — fan and pump switch on/off based on configurable thresholds (with hardware-side overrides)
 - **SMS alerts** — notifications via the Semaphore API with a 15-minute cooldown
 - **User management** — admin/user roles, bcrypt-hashed passwords, account activation/deactivation
@@ -29,7 +29,7 @@ Bio-Sync is an IoT system that monitors temperature and humidity in a growing en
 
 Three components work together:
 
-1. **Arduino firmware** (`sketch_may16a/`) — reads the DHT22 sensor every 3 s, posts readings to the PHP API, receives control commands, and applies safety overrides (e.g., forces the fan on above the max temperature regardless of dashboard state).
+1. **Arduino firmware** (`sketch_may16a/`) — reads the DHT22 sensor and applies local safety rules every 3 s. It polls the PHP API for control commands each loop, while the API saves paired temperature/humidity history every 10 minutes.
 2. **PHP web app** (repo root) — dashboard, authentication, user management, notifications, SMS dispatch, and the hardware ingest endpoint.
 3. **Python ML service** (`biosync_ml/`) — trains classifiers from logged sensor data and exposes a prediction API the dashboard queries.
 

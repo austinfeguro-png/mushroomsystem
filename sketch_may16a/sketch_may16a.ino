@@ -34,6 +34,8 @@ float maxTemperature = 28.0;
 // Dashboard control states
 int dashboardFanState = 0;
 int dashboardPumpState = 0;
+const unsigned long LOG_INTERVAL_MS = 10UL * 60UL * 1000UL;
+unsigned long lastLoggedAt = 0;
 
 // ==========================================================
 void setup() {
@@ -78,7 +80,12 @@ void loop() {
   Serial.print(" °C | HUM: ");
   Serial.println(humidity);
 
-  sendDataToServer(temperature, humidity);
+  bool logReading = (lastLoggedAt == 0)
+                 || (millis() - lastLoggedAt >= LOG_INTERVAL_MS);
+  bool serverAccepted = sendDataToServer(temperature, humidity, logReading);
+  if (logReading && serverAccepted) {
+    lastLoggedAt = millis();
+  }
 
   int finalFan = 0;
   int finalPump = 0;
@@ -148,9 +155,10 @@ void connectWiFi() {
 // ==========================================================
 // FINAL STABLE SERVER COMMUNICATION (FIXED CIPSEND)
 // ==========================================================
-void sendDataToServer(float temp, float hum) {
+bool sendDataToServer(float temp, float hum, bool logReading) {
 
-  String body = "temp=" + String(temp, 1) + "&hum=" + String(hum, 1);
+  String body = "temp=" + String(temp, 1) + "&hum=" + String(hum, 1)
+              + "&log=" + String(logReading ? 1 : 0);
 
   String request =
     "POST /mushroomsystem/api_update.php HTTP/1.1\r\n" +
@@ -174,7 +182,7 @@ void sendDataToServer(float temp, float hum) {
     Serial.println("TCP FAILED");
     esp8266.println("AT+CIPCLOSE");
     delay(500);
-    return;
+    return false;
   }
 
   Serial.println("TCP OK");
@@ -202,7 +210,7 @@ void sendDataToServer(float temp, float hum) {
 
     esp8266.println("AT+CIPCLOSE");
     delay(500);
-    return;
+    return false;
   }
 
   // ---------------- SEND REQUEST ----------------
@@ -258,6 +266,8 @@ if (fanIndex != -1 && pumpIndex != -1) {
   // ---------------- CLOSE ----------------
   esp8266.println("AT+CIPCLOSE");
   delay(500);
+  return response.indexOf("HTTP/1.1 200") >= 0
+      && response.indexOf("CMD:") >= 0;
 }
 
 float responseFloat(String response, String key, float fallback) {

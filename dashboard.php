@@ -1125,7 +1125,7 @@ if ($alertTriggered) {
                     <i class="fa-solid fa-bars"></i>
                 </button>
                 <div>
-                    <div class="topbar-title">Dashboard</div>
+                    <div class="topbar-title">Dashboards</div>
                     <div class="topbar-sub">Live monitoring &amp; control</div>
                 </div>
             </div>
