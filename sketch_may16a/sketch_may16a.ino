@@ -23,7 +23,7 @@ SoftwareSerial esp8266(10, 11); // RX, TX
 // WiFi and device-token values belong in the ignored local secrets.h file.
 
 // SERVER
-String host = "192.168.43.178";
+String host = "192.168.1.21";
 
 // ---------------- THRESHOLDS ----------------
 float minHumidity = 70.0;
@@ -36,6 +36,9 @@ int dashboardFanState = 0;
 int dashboardPumpState = 0;
 const unsigned long LOG_INTERVAL_MS = 10UL * 60UL * 1000UL;
 unsigned long lastLoggedAt = 0;
+const unsigned long WIFI_RETRY_INTERVAL_MS = 10000UL;
+unsigned long lastWifiAttemptAt = 0;
+bool wifiConnected = false;
 
 // ==========================================================
 void setup() {
@@ -56,11 +59,18 @@ void setup() {
   Serial.println("BIO-SYNC SYSTEM STARTING");
   Serial.println("================================");
 
-  connectWiFi();
+  wifiConnected = connectWiFi();
+  lastWifiAttemptAt = millis();
 }
 
 // ==========================================================
 void loop() {
+
+  if (!wifiConnected
+      && millis() - lastWifiAttemptAt >= WIFI_RETRY_INTERVAL_MS) {
+    lastWifiAttemptAt = millis();
+    wifiConnected = connectWiFi();
+  }
 
   float humidity = dht.readHumidity();
   float temperature = dht.readTemperature();
@@ -82,7 +92,12 @@ void loop() {
 
   bool logReading = (lastLoggedAt == 0)
                  || (millis() - lastLoggedAt >= LOG_INTERVAL_MS);
-  bool serverAccepted = sendDataToServer(temperature, humidity, logReading);
+  bool serverAccepted = false;
+  if (wifiConnected) {
+    serverAccepted = sendDataToServer(temperature, humidity, logReading);
+  } else {
+    Serial.println("[SKIP] Server request skipped; Wi-Fi is not connected.");
+  }
   if (logReading && serverAccepted) {
     lastLoggedAt = millis();
   }
@@ -136,20 +151,67 @@ void loop() {
 // ==========================================================
 // WIFI CONNECT
 // ==========================================================
-void connectWiFi() {
+bool sendATCommand(const String &command, const char *successToken,
+                   unsigned long timeoutMs) {
+  while (esp8266.available()) {
+    esp8266.read();
+  }
 
-  esp8266.println("AT");
-  delay(1500);
+  esp8266.println(command);
+  String response = "";
+  unsigned long startedAt = millis();
 
-  esp8266.println("AT+CWMODE=1");
-  delay(1500);
+  while (millis() - startedAt < timeoutMs) {
+    while (esp8266.available()) {
+      char c = (char)esp8266.read();
+      if (response.length() < 700) {
+        response += c;
+      }
+    }
 
-  String cmd = "AT+CWJAP=\"" + String(BIOSYNC_WIFI_SSID) + "\",\"" + String(BIOSYNC_WIFI_PASSWORD) + "\"";
-  esp8266.println(cmd);
+    if (response.indexOf(successToken) >= 0) {
+      return true;
+    }
+    if (response.indexOf("ERROR") >= 0 || response.indexOf("FAIL") >= 0) {
+      return false;
+    }
 
-  delay(10000);
+    delay(10);
+  }
 
-  Serial.println("WIFI CONNECTED");
+  return false;
+}
+
+bool connectWiFi() {
+  Serial.println("[WIFI] Checking ESP8266 AT response...");
+  if (!sendATCommand("AT", "OK", 2000)) {
+    Serial.println("[WIFI ERROR] ESP8266 did not respond to AT.");
+    return false;
+  }
+
+  if (!sendATCommand("AT+CWMODE=1", "OK", 3000)) {
+    Serial.println("[WIFI ERROR] Could not set station mode.");
+    return false;
+  }
+
+  String cmd = "AT+CWJAP=\"" + String(BIOSYNC_WIFI_SSID)
+             + "\",\"" + String(BIOSYNC_WIFI_PASSWORD) + "\"";
+  Serial.println("[WIFI] Joining the configured access point...");
+  if (!sendATCommand(cmd, "OK", 25000)) {
+    Serial.println("[WIFI ERROR] Join failed or timed out.");
+    Serial.println("[WIFI] Check 2.4 GHz Wi-Fi, credentials, power, and UART wiring.");
+    return false;
+  }
+
+  Serial.println("[WIFI] Join command completed; checking station IP status...");
+  if (!sendATCommand("AT+CIPSTATUS", "STATUS:2", 3000)) {
+    Serial.println("[WIFI ERROR] Wi-Fi association/IP was not confirmed.");
+    return false;
+  }
+
+  Serial.println("[WIFI OK] ESP8266 is associated and has an IP address.");
+  Serial.println("[WIFI NOTE] This confirms Wi-Fi only, not server reachability.");
+  return true;
 }
 
 // ==========================================================
@@ -161,12 +223,12 @@ bool sendDataToServer(float temp, float hum, bool logReading) {
               + "&log=" + String(logReading ? 1 : 0);
 
   String request =
-    "POST /mushroomsystem/api_update.php HTTP/1.1\r\n" +
-    "Host: " + host + "\r\n" +
-    "X-Device-Token: " + String(BIOSYNC_DEVICE_TOKEN) + "\r\n" +
-    "Content-Type: application/x-www-form-urlencoded\r\n" +
-    "Content-Length: " + String(body.length()) + "\r\n" +
-    "Connection: close\r\n\r\n" + body;
+  String("POST /mushroomsystem/api_update.php HTTP/1.1\r\n") +
+  "Host: " + host + "\r\n" +
+  "X-Device-Token: " + String(BIOSYNC_DEVICE_TOKEN) + "\r\n" +
+  "Content-Type: application/x-www-form-urlencoded\r\n" +
+  "Content-Length: " + String(body.length()) + "\r\n" +
+  "Connection: close\r\n\r\n" + body;
 
   Serial.println("Connecting to server...");
 
