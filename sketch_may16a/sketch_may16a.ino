@@ -1,344 +1,504 @@
-// ==========================================================
-// BIO-SYNC SMART GREENHOUSE SYSTEM (FINAL STABLE VERSION)
-// FIXED: CIPSEND FAILED + TCP STABILITY + BUFFER HANDLING
-// ==========================================================
 
-#include <SoftwareSerial.h>
 #include <DHT.h>
-#include "secrets.h"
+#include <SoftwareSerial.h>
 
-// ---------------- DHT11 ----------------
+// ======================================================
+// BIO-SYNC SMART GREENHOUSE SYSTEM
+// Arduino Uno + DHT22 + ESP-01S
+// Fan + Water Pump + 3 Indicator LEDs
+// ======================================================
+
+// ---------------- WIFI SETTINGS ----------------
+// Replace these with your actual credentials.
+const char* BIOSYNC_WIFI_SSID = "fhatvic@v istal 5G";
+const char* BIOSYNC_WIFI_PASSWORD = "fhat@1012";
+const char* BIOSYNC_DEVICE_TOKEN = "YOUR_DEVICE_TOKEN";
+// ---------------- DHT22 SENSOR ----------------
 #define DHTPIN 2
 #define DHTTYPE DHT22
 DHT dht(DHTPIN, DHTTYPE);
 
-// ---------------- OUTPUT DEVICES ----------------
-const int FAN_PIN = 5;
-const int PUMP_PIN = 6;
-const int ALERT_PIN = 7;
+// ---------------- RELAYS ----------------
+const byte FAN_RELAY = 5;
+const byte PUMP_RELAY = 6;
 
-// ---------------- ESP8266 ----------------
-SoftwareSerial esp8266(10, 11); // RX, TX
+// ---------------- INDICATOR LEDS ----------------
+const byte ALERT_LED = 7;
+const byte FAN_LED = 4;
+const byte PUMP_LED = 3;
 
-// WiFi and device-token values belong in the ignored local secrets.h file.
+// ---------------- ESP-01S ----------------
+// Arduino RX = D10 (connect to ESP TX)
+// Arduino TX = D11 (connect to ESP RX through level shifting)
+SoftwareSerial esp8266(10, 11);
 
-// SERVER
-String host = "192.168.1.21";
+// Set true for active-LOW relay boards.
+const bool RELAY_ACTIVE_LOW = false;
+
+// ---------------- SERVER ----------------
+const char HOST[] = "192.168.43.178";
+const int HTTP_PORT = 80;
+const char API_PATH[] = "/mushroomsystem/api_update.php";
 
 // ---------------- THRESHOLDS ----------------
-float minHumidity = 70.0;
-float maxHumidity = 85.0;
 float minTemperature = 24.0;
 float maxTemperature = 28.0;
+float minHumidity = 70.0;
+float maxHumidity = 85.0;
 
-// Dashboard control states
+// Dashboard commands
 int dashboardFanState = 0;
 int dashboardPumpState = 0;
-const unsigned long LOG_INTERVAL_MS = 10UL * 60UL * 1000UL;
+
+// ---------------- TIMING ----------------
+const unsigned long SENSOR_INTERVAL = 3000UL;
+const unsigned long LOG_INTERVAL = 600000UL;
+
+unsigned long lastSensorRead = 0;
 unsigned long lastLoggedAt = 0;
-const unsigned long WIFI_RETRY_INTERVAL_MS = 10000UL;
-unsigned long lastWifiAttemptAt = 0;
-bool wifiConnected = false;
+bool firstLogPending = true;
 
-// ==========================================================
-void setup() {
-  Serial.begin(9600);
-  esp8266.begin(9600);
-
-  dht.begin();
-
-  pinMode(FAN_PIN, OUTPUT);
-  pinMode(PUMP_PIN, OUTPUT);
-  pinMode(ALERT_PIN, OUTPUT);
-
-  digitalWrite(FAN_PIN, LOW);
-  digitalWrite(PUMP_PIN, LOW);
-  digitalWrite(ALERT_PIN, LOW);
-
-  Serial.println("================================");
-  Serial.println("BIO-SYNC SYSTEM STARTING");
-  Serial.println("================================");
-
-  wifiConnected = connectWiFi();
-  lastWifiAttemptAt = millis();
+// ======================================================
+// RELAY CONTROL
+// ======================================================
+void setRelay(byte pin, bool turnOn) {
+  if (RELAY_ACTIVE_LOW) {
+    digitalWrite(pin, turnOn ? LOW : HIGH);
+  } else {
+    digitalWrite(pin, turnOn ? HIGH : LOW);
+  }
 }
 
-// ==========================================================
-void loop() {
-
-  if (!wifiConnected
-      && millis() - lastWifiAttemptAt >= WIFI_RETRY_INTERVAL_MS) {
-    lastWifiAttemptAt = millis();
-    wifiConnected = connectWiFi();
-  }
-
-  float humidity = dht.readHumidity();
-  float temperature = dht.readTemperature();
-
-  if (isnan(humidity) || isnan(temperature)) {
-    Serial.println("DHT22 SENSOR FAILED!");
-    digitalWrite(FAN_PIN, LOW);
-    digitalWrite(PUMP_PIN, LOW);
-    digitalWrite(ALERT_PIN, HIGH);
-    Serial.println("[FAILSAFE] FAN OFF, PUMP OFF, ALERT ON");
-    delay(2000);
-    return;
-  }
-
-  Serial.print("TEMP: ");
-  Serial.print(temperature);
-  Serial.print(" °C | HUM: ");
-  Serial.println(humidity);
-
-  bool logReading = (lastLoggedAt == 0)
-                 || (millis() - lastLoggedAt >= LOG_INTERVAL_MS);
-  bool serverAccepted = false;
-  if (wifiConnected) {
-    serverAccepted = sendDataToServer(temperature, humidity, logReading);
-  } else {
-    Serial.println("[SKIP] Server request skipped; Wi-Fi is not connected.");
-  }
-  if (logReading && serverAccepted) {
-    lastLoggedAt = millis();
-  }
-
-  int finalFan = 0;
-  int finalPump = 0;
-  int alertState = 0;
-
-  // ---------------- TEMP RULE ----------------
-  if (temperature > maxTemperature) {
-    finalFan = 1;
-    alertState = 1;
-    Serial.println("[OVERRIDE] HIGH TEMP -> FAN ON");
-  } else if (temperature < minTemperature) {
-    alertState = 1;
-    Serial.println("[ALERT] LOW TEMP");
-  } else {
-    finalFan = dashboardFanState;
-  }
-
-  // ---------------- HUMIDITY RULE ----------------
-  if (humidity < minHumidity) {
-    finalPump = 1;
-    alertState = 1;
-    Serial.println("[OVERRIDE] LOW HUM -> PUMP ON");
-
-  } else if (humidity > maxHumidity) {
-    finalFan = 1;
-    finalPump = 0;
-    alertState = 1;
-    Serial.println("[OVERRIDE] HIGH HUM -> FAN ON");
-
-  } else {
-    finalPump = 0;
-  }
-
-  digitalWrite(FAN_PIN, finalFan);
-  digitalWrite(PUMP_PIN, finalPump);
-  digitalWrite(ALERT_PIN, alertState);
-
-  Serial.print("FINAL STATE FAN:");
-  Serial.print(finalFan);
-  Serial.print(" PUMP:");
-  Serial.println(finalPump);
-
-  Serial.println("--------------------------------");
-
-  delay(3000);
-}
-
-// ==========================================================
-// WIFI CONNECT
-// ==========================================================
-bool sendATCommand(const String &command, const char *successToken,
-                   unsigned long timeoutMs) {
+// ======================================================
+// SEND AT COMMAND AND READ RESPONSE
+// ======================================================
+String sendAT(const String &command,
+              unsigned long timeout) {
   while (esp8266.available()) {
     esp8266.read();
   }
 
   esp8266.println(command);
+
   String response = "";
-  unsigned long startedAt = millis();
+  unsigned long start = millis();
 
-  while (millis() - startedAt < timeoutMs) {
+  while (millis() - start < timeout) {
     while (esp8266.available()) {
-      char c = (char)esp8266.read();
-      if (response.length() < 700) {
-        response += c;
-      }
+      response += (char)esp8266.read();
     }
 
-    if (response.indexOf(successToken) >= 0) {
-      return true;
+    if (response.indexOf("OK") >= 0 ||
+        response.indexOf("ERROR") >= 0 ||
+        response.indexOf("FAIL") >= 0 ||
+        response.indexOf("SEND OK") >= 0) {
+      break;
     }
-    if (response.indexOf("ERROR") >= 0 || response.indexOf("FAIL") >= 0) {
-      return false;
-    }
-
-    delay(10);
   }
 
-  return false;
+  return response;
 }
 
+// ======================================================
+// WIFI CONNECTION
+// ======================================================
 bool connectWiFi() {
-  Serial.println("[WIFI] Checking ESP8266 AT response...");
-  if (!sendATCommand("AT", "OK", 2000)) {
-    Serial.println("[WIFI ERROR] ESP8266 did not respond to AT.");
+  Serial.println("Checking ESP-01S...");
+
+  String response = sendAT("AT", 3000);
+
+  if (response.indexOf("OK") < 0) {
+    Serial.println("ESP-01S not responding.");
+    Serial.println(response);
     return false;
   }
 
-  if (!sendATCommand("AT+CWMODE=1", "OK", 3000)) {
-    Serial.println("[WIFI ERROR] Could not set station mode.");
+  Serial.println("ESP-01S OK");
+
+  sendAT("ATE0", 2000);
+
+  response = sendAT("AT+CWMODE=1", 3000);
+
+  if (response.indexOf("OK") < 0) {
+    Serial.println("Could not set Wi-Fi mode.");
     return false;
   }
 
-  String cmd = "AT+CWJAP=\"" + String(BIOSYNC_WIFI_SSID)
-             + "\",\"" + String(BIOSYNC_WIFI_PASSWORD) + "\"";
-  Serial.println("[WIFI] Joining the configured access point...");
-  if (!sendATCommand(cmd, "OK", 25000)) {
-    Serial.println("[WIFI ERROR] Join failed or timed out.");
-    Serial.println("[WIFI] Check 2.4 GHz Wi-Fi, credentials, power, and UART wiring.");
+  String joinCommand =
+      "AT+CWJAP=\"" +
+      String(BIOSYNC_WIFI_SSID) +
+      "\",\"" +
+      String(BIOSYNC_WIFI_PASSWORD) +
+      "\"";
+
+  Serial.println("Connecting to Wi-Fi...");
+
+  response = sendAT(joinCommand, 20000);
+
+  if (response.indexOf("OK") < 0) {
+    Serial.println("Wi-Fi connection failed.");
+    Serial.println(response);
     return false;
   }
 
-  Serial.println("[WIFI] Join command completed; checking station IP status...");
-  if (!sendATCommand("AT+CIPSTATUS", "STATUS:2", 3000)) {
-    Serial.println("[WIFI ERROR] Wi-Fi association/IP was not confirmed.");
-    return false;
-  }
-
-  Serial.println("[WIFI OK] ESP8266 is associated and has an IP address.");
-  Serial.println("[WIFI NOTE] This confirms Wi-Fi only, not server reachability.");
+  Serial.println("WIFI CONNECTED");
   return true;
 }
 
-// ==========================================================
-// FINAL STABLE SERVER COMMUNICATION (FIXED CIPSEND)
-// ==========================================================
-bool sendDataToServer(float temp, float hum, bool logReading) {
+// ======================================================
+// PARSE FLOAT FROM SERVER RESPONSE
+// ======================================================
+float responseFloat(String response,
+                    String key,
+                    float fallback) {
+  int start = response.indexOf(key);
 
-  String body = "temp=" + String(temp, 1) + "&hum=" + String(hum, 1)
-              + "&log=" + String(logReading ? 1 : 0);
+  if (start < 0) {
+    return fallback;
+  }
+
+  start += key.length();
+
+  int end = response.indexOf(',', start);
+  int lineEnd = response.indexOf('\r', start);
+  int nextLine = response.indexOf('\n', start);
+
+  if (end < 0 ||
+      (lineEnd >= 0 && lineEnd < end)) {
+    end = lineEnd;
+  }
+
+  if (end < 0 ||
+      (nextLine >= 0 && nextLine < end)) {
+    end = nextLine;
+  }
+
+  if (end < 0) {
+    end = response.length();
+  }
+
+  String value = response.substring(start, end);
+  value.trim();
+
+  return value.toFloat();
+}
+
+// ======================================================
+// PARSE DASHBOARD COMMANDS
+// Expected response includes:
+// CMD:FAN=1,PUMP=0,MIN_TEMP=24,MAX_TEMP=28,
+// MIN_HUM=70,MAX_HUM=85
+// ======================================================
+void parseServerCommands(String response) {
+  int fanIndex = response.indexOf("FAN=");
+  int pumpIndex = response.indexOf("PUMP=");
+
+  if (fanIndex < 0 || pumpIndex < 0) {
+    Serial.println("No dashboard commands received.");
+    return;
+  }
+
+  dashboardFanState =
+      response.substring(fanIndex + 4, fanIndex + 5).toInt();
+
+  dashboardPumpState =
+      response.substring(pumpIndex + 5, pumpIndex + 6).toInt();
+
+  dashboardFanState = constrain(dashboardFanState, 0, 1);
+  dashboardPumpState = constrain(dashboardPumpState, 0, 1);
+
+  minTemperature =
+      responseFloat(response, "MIN_TEMP=", minTemperature);
+
+  maxTemperature =
+      responseFloat(response, "MAX_TEMP=", maxTemperature);
+
+  minHumidity =
+      responseFloat(response, "MIN_HUM=", minHumidity);
+
+  maxHumidity =
+      responseFloat(response, "MAX_HUM=", maxHumidity);
+
+  Serial.println("DASHBOARD SYNC OK");
+
+  Serial.print("Dashboard FAN: ");
+  Serial.println(dashboardFanState);
+
+  Serial.print("Dashboard PUMP: ");
+  Serial.println(dashboardPumpState);
+
+  Serial.print("Temperature limits: ");
+  Serial.print(minTemperature);
+  Serial.print(" - ");
+  Serial.println(maxTemperature);
+
+  Serial.print("Humidity limits: ");
+  Serial.print(minHumidity);
+  Serial.print(" - ");
+  Serial.println(maxHumidity);
+}
+
+// ======================================================
+// SEND SENSOR DATA TO PHP SERVER
+// ======================================================
+bool sendDataToServer(float temperature,
+                      float humidity,
+                      bool logReading) {
+  String body =
+      "temp=" + String(temperature, 1) +
+      "&hum=" + String(humidity, 1) +
+      "&log=" + String(logReading ? 1 : 0);
 
   String request =
-  String("POST /mushroomsystem/api_update.php HTTP/1.1\r\n") +
-  "Host: " + host + "\r\n" +
-  "X-Device-Token: " + String(BIOSYNC_DEVICE_TOKEN) + "\r\n" +
-  "Content-Type: application/x-www-form-urlencoded\r\n" +
-  "Content-Length: " + String(body.length()) + "\r\n" +
-  "Connection: close\r\n\r\n" + body;
+      "POST " + String(API_PATH) + " HTTP/1.1\r\n" +
+      "Host: " + String(HOST) + "\r\n" +
+      "X-Device-Token: " +
+      String(BIOSYNC_DEVICE_TOKEN) + "\r\n" +
+      "Content-Type: application/x-www-form-urlencoded\r\n" +
+      "Content-Length: " + String(body.length()) + "\r\n" +
+      "Connection: close\r\n\r\n" +
+      body;
 
   Serial.println("Connecting to server...");
 
-  // ---------------- CLEAN BUFFER ----------------
-  while (esp8266.available()) esp8266.read();
-  delay(300);
+  // Clear previous ESP data.
+  while (esp8266.available()) {
+    esp8266.read();
+  }
 
-  // ---------------- TCP START ----------------
-  esp8266.println("AT+CIPSTART=\"TCP\",\"" + host + "\",80");
-  delay(2000);
+  String response = sendAT(
+      "AT+CIPSTART=\"TCP\",\"" +
+      String(HOST) + "\"," + String(HTTP_PORT),
+      8000
+  );
 
-  if (esp8266.find("ERROR") || esp8266.find("FAIL")) {
-    Serial.println("TCP FAILED");
-    esp8266.println("AT+CIPCLOSE");
-    delay(500);
+  if (response.indexOf("CONNECT") < 0 &&
+      response.indexOf("ALREADY CONNECTED") < 0) {
+    Serial.println("TCP CONNECTION FAILED");
+    Serial.println(response);
+    sendAT("AT+CIPCLOSE", 1000);
     return false;
   }
 
-  Serial.println("TCP OK");
+  Serial.println("TCP CONNECTED");
 
-  delay(300);
-
-  // ---------------- CIPSEND ----------------
+  // Request permission to send the HTTP request.
   esp8266.print("AT+CIPSEND=");
   esp8266.println(request.length());
 
   unsigned long start = millis();
   bool prompt = false;
+  String promptResponse = "";
 
   while (millis() - start < 5000) {
-    if (esp8266.available()) {
-      if (esp8266.read() == '>') {
+    while (esp8266.available()) {
+      char c = esp8266.read();
+      promptResponse += c;
+
+      if (c == '>') {
         prompt = true;
         break;
       }
+    }
+
+    if (prompt) {
+      break;
+    }
+
+    if (promptResponse.indexOf("ERROR") >= 0 ||
+        promptResponse.indexOf("FAIL") >= 0) {
+      break;
     }
   }
 
   if (!prompt) {
     Serial.println("CIPSEND FAILED");
-
-    esp8266.println("AT+CIPCLOSE");
-    delay(500);
+    Serial.println(promptResponse);
+    sendAT("AT+CIPCLOSE", 1000);
     return false;
   }
 
-  // ---------------- SEND REQUEST ----------------
+  // Send the complete HTTP request.
   esp8266.print(request);
 
-  delay(1500);
-
-  // ---------------- READ RESPONSE ----------------
-  String response = "";
+  // Read the HTTP response.
+  String serverResponse = "";
   start = millis();
 
-  while (millis() - start < 6000) {
+  while (millis() - start < 8000) {
     while (esp8266.available()) {
-      response += (char)esp8266.read();
+      serverResponse += (char)esp8266.read();
+    }
+
+    if (serverResponse.indexOf("\r\nCLOSED") >= 0 ||
+        serverResponse.endsWith("CLOSED")) {
+      break;
     }
   }
 
-  Serial.println("RAW RESPONSE:");
-  Serial.println(response);
+  Serial.println("SERVER RESPONSE:");
+  Serial.println(serverResponse);
 
-  // ---------------- PARSE COMMAND ----------------
-  // ==========================================================
-// PARSE COMMAND FROM PHP RESPONSE
-// FORMAT: CMD:FAN=1,PUMP=0
-// ==========================================================
+  bool httpOK =
+      serverResponse.indexOf("HTTP/1.1 200") >= 0 ||
+      serverResponse.indexOf("HTTP/1.0 200") >= 0;
 
-int fanIndex = response.indexOf("FAN=");
-int pumpIndex = response.indexOf("PUMP=");
+  if (httpOK) {
+    parseServerCommands(serverResponse);
+  } else {
+    Serial.println("HTTP REQUEST FAILED OR SERVER ERROR");
+  }
 
-if (fanIndex != -1 && pumpIndex != -1) {
+  sendAT("AT+CIPCLOSE", 1000);
 
-  int fanValue = response.substring(fanIndex + 4, fanIndex + 5).toInt();
-  int pumpValue = response.substring(pumpIndex + 5, pumpIndex + 6).toInt();
-
-  dashboardFanState = fanValue;
-  dashboardPumpState = pumpValue;
-
-  minTemperature = responseFloat(response, "MIN_TEMP=", minTemperature);
-  maxTemperature = responseFloat(response, "MAX_TEMP=", maxTemperature);
-  minHumidity = responseFloat(response, "MIN_HUM=", minHumidity);
-  maxHumidity = responseFloat(response, "MAX_HUM=", maxHumidity);
-
-  Serial.println("DASHBOARD SYNC OK");
-  Serial.print("FAN=");
-  Serial.print(dashboardFanState);
-  Serial.print(" PUMP=");
-  Serial.println(dashboardPumpState);
-
-} else {
-  Serial.println("NO COMMAND RECEIVED");
+  return httpOK;
 }
 
-  // ---------------- CLOSE ----------------
-  esp8266.println("AT+CIPCLOSE");
-  delay(500);
-  return response.indexOf("HTTP/1.1 200") >= 0
-      && response.indexOf("CMD:") >= 0;
+// ======================================================
+// AUTOMATIC TEMPERATURE AND HUMIDITY CONTROL
+// ======================================================
+void updateOutputs(float temperature, float humidity) {
+  bool highTemp = temperature > maxTemperature;
+  bool lowTemp = temperature < minTemperature;
+  bool highHumidity = humidity > maxHumidity;
+  bool lowHumidity = humidity < minHumidity;
+
+  // Start with dashboard-requested states.
+  bool fanOn = dashboardFanState == 1;
+  bool pumpOn = dashboardPumpState == 1;
+
+  // Automatic temperature override.
+  if (highTemp) {
+    fanOn = true;
+    Serial.println("[OVERRIDE] HIGH TEMPERATURE");
+  }
+
+  if (lowTemp) {
+    Serial.println("[ALERT] LOW TEMPERATURE");
+  }
+
+  // Automatic humidity overrides.
+  if (lowHumidity) {
+    pumpOn = true;
+    Serial.println("[OVERRIDE] LOW HUMIDITY - PUMP ON");
+  }
+
+  if (highHumidity) {
+    fanOn = true;
+    pumpOn = false;
+    Serial.println("[OVERRIDE] HIGH HUMIDITY - FAN ON");
+  }
+
+  bool alertOn =
+      highTemp || lowTemp || highHumidity || lowHumidity;
+
+  // Apply output states.
+  setRelay(FAN_RELAY, fanOn);
+  setRelay(PUMP_RELAY, pumpOn);
+
+  // Indicator LEDs reflect commanded states.
+  digitalWrite(FAN_LED, fanOn ? HIGH : LOW);
+  digitalWrite(PUMP_LED, pumpOn ? HIGH : LOW);
+  digitalWrite(ALERT_LED, alertOn ? HIGH : LOW);
+
+  Serial.print("FAN: ");
+  Serial.print(fanOn ? "ON" : "OFF");
+
+  Serial.print(" | PUMP: ");
+  Serial.print(pumpOn ? "ON" : "OFF");
+
+  Serial.print(" | ALERT: ");
+  Serial.println(alertOn ? "ON" : "OFF");
 }
 
-float responseFloat(String response, String key, float fallback) {
-  int start = response.indexOf(key);
-  if (start < 0) return fallback;
-  start += key.length();
-  int end = response.indexOf(',', start);
-  int lineEnd = response.indexOf('\r', start);
-  if (end < 0 || (lineEnd >= 0 && lineEnd < end)) end = lineEnd;
-  if (end < 0) end = response.length();
-  return response.substring(start, end).toFloat();
+// ======================================================
+// SETUP
+// ======================================================
+void setup() {
+  Serial.begin(9600);
+  esp8266.begin(9600);
+
+  pinMode(FAN_RELAY, OUTPUT);
+  pinMode(PUMP_RELAY, OUTPUT);
+
+  pinMode(ALERT_LED, OUTPUT);
+  pinMode(FAN_LED, OUTPUT);
+  pinMode(PUMP_LED, OUTPUT);
+
+  // Turn outputs off during startup.
+  setRelay(FAN_RELAY, false);
+  setRelay(PUMP_RELAY, false);
+
+  digitalWrite(ALERT_LED, LOW);
+  digitalWrite(FAN_LED, LOW);
+  digitalWrite(PUMP_LED, LOW);
+
+  dht.begin();
+
+  delay(2000);
+
+  Serial.println();
+  Serial.println("================================");
+  Serial.println("BIO-SYNC SYSTEM STARTING");
+  Serial.println("================================");
+
+  connectWiFi();
+
+  Serial.println("Starting sensor monitoring...");
+}
+
+// ======================================================
+// MAIN LOOP
+// ======================================================
+void loop() {
+  if (millis() - lastSensorRead < SENSOR_INTERVAL) {
+    return;
+  }
+
+  lastSensorRead = millis();
+
+  float humidity = dht.readHumidity();
+  float temperature = dht.readTemperature();
+
+  // Fail-safe if sensor readings are invalid.
+  if (isnan(humidity) || isnan(temperature)) {
+    Serial.println("DHT22 SENSOR FAILED!");
+
+    setRelay(FAN_RELAY, false);
+    setRelay(PUMP_RELAY, false);
+
+    digitalWrite(FAN_LED, LOW);
+    digitalWrite(PUMP_LED, LOW);
+    digitalWrite(ALERT_LED, HIGH);
+
+    Serial.println("FAILSAFE: FAN OFF, PUMP OFF, ALERT ON");
+    return;
+  }
+
+  Serial.println();
+  Serial.print("TEMP: ");
+  Serial.print(temperature, 1);
+  Serial.print(" C | HUM: ");
+  Serial.print(humidity, 1);
+  Serial.println(" %");
+
+  bool logReading =
+      firstLogPending ||
+      millis() - lastLoggedAt >= LOG_INTERVAL;
+
+  bool serverOK = sendDataToServer(
+      temperature,
+      humidity,
+      logReading
+  );
+
+  if (logReading && serverOK) {
+    lastLoggedAt = millis();
+    firstLogPending = false;
+  }
+
+  // Run local automatic control even if server communication fails.
+  updateOutputs(temperature, humidity);
+
+  Serial.println("--------------------------------");
 }
