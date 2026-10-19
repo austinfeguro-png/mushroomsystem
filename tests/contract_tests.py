@@ -258,6 +258,15 @@ check("notificationspage.php uses stage-based thresholds",
       "still reads legacy max_temperature/min_humidity/max_humidity keys -> "
       "alert banner here can disagree with dashboard")
 
+print("=== 12. Historical background refresh ===")
+refresh = hist[hist.index('// SILENT REFRESH'):]
+check("history timer never navigates or reloads", "setInterval(() => refreshHistory(), 5000)" in refresh and "location.reload" not in refresh)
+check("history JSON exits before SMS dispatch", hist.index("'rows' => $historicalData") < hist.index('// 6. ALERT SYSTEM & SMS DISPATCH') and "header('Cache-Control: no-store')" in hist)
+check("history reapplies search and sort without toggling direction", "sortTable(activeSortColumn, false)" in refresh and "searchTable();" in refresh)
+check("history preserves viewport and table scroll", "window.scrollTo(scrollX, scrollY)" in refresh and "wrap.scrollLeft = left" in refresh and "wrap.scrollTop = top" in refresh)
+check("history ignores stale or interrupted background requests", "historyRequest !== controller" in refresh and "historyRequest.abort()" in refresh and "historyBusy()" in refresh)
+check("filter application updates results without navigation", "refreshHistory(url, true)" in hist and "window.history.replaceState" in refresh)
+
 print()
 print(f"Intentionally deferred   : {len(KNOWN)}")
 if FAILURES:

@@ -233,6 +233,22 @@ if ($filterSensor === 'all') {
     }
 }
 
+// Read-only refresh returns before SMS dispatch and cooldown writes.
+if (($_GET['history_refresh'] ?? '') === '1') {
+    header('Content-Type: application/json');
+    header('Cache-Control: no-store');
+    foreach ($historicalData as &$row) {
+        $row['timestamp'] = date('M d, Y H:i:s', strtotime($row['timestamp']));
+    }
+    unset($row);
+    echo json_encode([
+        'rows' => $historicalData, 'title' => $chartTitle, 'sensor' => $filterSensor,
+        'labels' => $chartLabels, 'values' => $chartValues,
+        'labels2' => $chartLabels2, 'values2' => $chartValues2,
+    ]);
+    exit();
+}
+
 // ==========================================
 // 6. ALERT SYSTEM & SMS DISPATCH
 // $cooldownSeconds defined first so the alert branch can reference it
@@ -1287,6 +1303,7 @@ document.getElementById('settingsModal').addEventListener('click', e => { if (e.
 document.getElementById('saveSettings').addEventListener('click', () => {
     applyTheme(modalTheme.checked);
     const btn = document.getElementById('saveSettings');
+    pendingSettings = true;
     btn.textContent = 'Saving...';
     btn.disabled = true;
 
@@ -1317,6 +1334,7 @@ document.getElementById('saveSettings').addEventListener('click', () => {
             }, 900);
         })
         .catch(err => {
+            pendingSettings = false;
             btn.textContent = 'Error — try again';
             btn.style.background = '#dc2626';
             console.error('Settings save error:', err);
@@ -1434,10 +1452,12 @@ function searchTable() {
 // TABLE — SORT
 // ================================================
 let sortDir = {};
-function sortTable(col) {
+let activeSortColumn = null;
+function sortTable(col, toggle = true) {
+    activeSortColumn = col;
     const tbody = document.querySelector('#dataTable tbody');
     const rows  = Array.from(tbody.querySelectorAll('tr'));
-    sortDir[col] = !sortDir[col]; // toggle asc/desc
+    if (toggle) sortDir[col] = !sortDir[col]; // toggle asc/desc
     rows.sort((a, b) => {
         const aText = a.cells[col]?.textContent.trim() ?? '';
         const bText = b.cells[col]?.textContent.trim() ?? '';
@@ -1487,7 +1507,7 @@ function applyFilters() {
     url.searchParams.set('sensor', sensor);
     url.searchParams.set('start',  start);
     url.searchParams.set('end',    end);
-    window.location.href = url.toString();
+    refreshHistory(url, true);
 }
 
 // ================================================
@@ -1499,17 +1519,104 @@ function confirmLogout(e) {
 }
 
 // ================================================
-// AUTO-REFRESH — preserve active filter params
+// SILENT REFRESH — keep controls, search, sorting and scroll intact
 // ================================================
 let pendingSettings = false;
-
-setInterval(() => {
-    const modalOpen = document.getElementById('settingsModal').classList.contains('open');
-    if (!modalOpen && !pendingSettings) {
-        // Keep whatever filter params are currently in the URL
-        location.reload();
+let historyRequest = null;
+let lastHistoryInteraction = 0;
+['pointerdown', 'keydown', 'wheel', 'touchmove', 'scroll'].forEach(name => {
+    document.addEventListener(name, () => { lastHistoryInteraction = Date.now(); },
+        { passive: true, capture: true });
+});
+function historyBusy() {
+    const selection = window.getSelection();
+    return document.hidden || pendingSettings ||
+        document.getElementById('settingsModal').classList.contains('open') ||
+        Date.now() - lastHistoryInteraction < 1500 || (selection && !selection.isCollapsed);
+}
+async function refreshHistory(url = new URL(window.location.href), applyingFilters = false) {
+    if (!applyingFilters && (historyRequest || historyBusy())) return;
+    if (historyRequest) historyRequest.abort();
+    const controller = new AbortController();
+    historyRequest = controller;
+    const timeout = setTimeout(() => controller.abort(), 10000);
+    const requestUrl = new URL(url);
+    requestUrl.searchParams.set('history_refresh', '1');
+    try {
+        const response = await fetch(requestUrl, { signal: controller.signal,
+            cache: 'no-store', headers: { 'Accept': 'application/json' } });
+        if (!response.ok || response.redirected ||
+            !(response.headers.get('content-type') || '').includes('application/json')) {
+            throw new Error('History refresh unavailable');
+        }
+        const data = await response.json();
+        if (historyRequest !== controller || (!applyingFilters && historyBusy())) return;
+        if (!Array.isArray(data.rows) || !Array.isArray(data.labels) ||
+            !Array.isArray(data.values) || !Array.isArray(data.labels2) ||
+            !Array.isArray(data.values2)) throw new Error('Invalid history response');
+        const fragment = document.createDocumentFragment();
+        data.rows.forEach(row => {
+            const tr = document.createElement('tr');
+            ['#' + row.id, row.timestamp, row.sensor, row.value + ' ' + row.unit].forEach((value, index) => {
+                const td = document.createElement('td');
+                td.textContent = value;
+                if (index === 0) td.className = 'id-col';
+                tr.appendChild(td);
+            });
+            const td = document.createElement('td'), badge = document.createElement('span');
+            const status = ['Critical', 'Warning'].includes(row.status) ? row.status : 'Normal';
+            badge.className = 'badge badge-' + status.toLowerCase();
+            badge.textContent = status;
+            td.appendChild(badge);
+            tr.appendChild(td);
+            fragment.appendChild(tr);
+        });
+        if (!data.rows.length) {
+            const tr = document.createElement('tr'), td = document.createElement('td');
+            td.colSpan = 5;
+            td.textContent = 'No records found for the selected filters.';
+            tr.appendChild(td);
+            fragment.appendChild(tr);
+        }
+        const scrollX = window.scrollX, scrollY = window.scrollY;
+        const wrap = document.querySelector('.table-wrap');
+        const left = wrap.scrollLeft, top = wrap.scrollTop;
+        document.querySelector('#dataTable tbody').replaceChildren(fragment);
+        if (activeSortColumn !== null) sortTable(activeSortColumn, false);
+        searchTable();
+        const all = data.sensor === 'all', humidity = data.sensor === 'humidity';
+        const primary = { ...datasets[0], label: humidity ? 'Humidity Node 1' : 'Temperature Node 1',
+            data: data.values, labels: data.labels, borderColor: humidity ? '#2563eb' : '#dc2626',
+            pointBackgroundColor: humidity ? '#2563eb' : '#dc2626',
+            backgroundColor: humidity ? 'rgba(37,99,235,0.07)' : 'rgba(220,38,38,0.07)' };
+        historyChart.data.labels = all ? [...new Set([...data.labels, ...data.labels2])] : data.labels;
+        historyChart.data.datasets = [primary];
+        if (all && data.values2.length) historyChart.data.datasets.push({ ...primary,
+            label: 'Humidity Node 1', data: data.values2, labels: data.labels2,
+            borderColor: '#2563eb', pointBackgroundColor: '#2563eb',
+            backgroundColor: 'rgba(37,99,235,0.07)', yAxisID: 'y2' });
+        historyChart.options.plugins.legend.display = all;
+        historyChart.options.scales.y2.display = all;
+        historyChart.options.scales.y.title.display = all;
+        historyChart.options.scales.y.ticks.color = humidity ? '#2563eb' : '#dc2626';
+        historyChart.update('none');
+        document.getElementById('chartTitle').textContent = data.title;
+        if (applyingFilters) {
+            url.searchParams.delete('history_refresh');
+            window.history.replaceState(null, '', url);
+        }
+        wrap.scrollLeft = left;
+        wrap.scrollTop = top;
+        window.scrollTo(scrollX, scrollY);
+    } catch (error) {
+        if (error.name !== 'AbortError') console.error('History refresh failed:', error);
+        if (applyingFilters && historyRequest === controller) alert('Unable to apply filters. Please try again.');
+    } finally {
+        clearTimeout(timeout);
+        if (historyRequest === controller) historyRequest = null;
     }
-}, 5000);
+}
+setInterval(() => refreshHistory(), 5000);
 </script>
 <script>
 // Escape closes the Settings modal
