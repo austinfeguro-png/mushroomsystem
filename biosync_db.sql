@@ -340,7 +340,7 @@ CREATE TABLE `users` (
 INSERT INTO `users` (`id`, `full_name`, `username`, `password_hash`, `status`, `role`, `phone`, `avatar_url`) VALUES
 (1, 'Admin User', 'admin', '$2y$10$ousWzcWmWRzJarjJeTcDCeJ1GnkKVgWWi6OoyCi4WpAAbcLX1Ugqa', 'Active', 'user', '+1234567890', NULL),
 (2, 'jeviejohn calderon', 'jv', '$2y$10$ADX8kal7a7UC/iLCtVqEQeKbI5aiZcpgKtf6U6x34yFzp6EdWIRAm', 'Active', 'admin', '+639265028114', NULL),
-(3, 'Admin Austin', 'SPECTRE', '$2y$10$slMjocVsuyub9rFa2Kejtebtd4RhaD.y7QgALPZ6Ft/VrfyX3t.Kq', 'Active', 'admin', '09065605274', NULL),
+(3, 'Admin Austin', 'SPECTRE', '$2y$10$xyYlxr8ud/VsHiAsVMav5.pR1D3iC6Fp5Lx6TzI2lb6sq35R38r/u', 'Active', 'admin', '09065605274', NULL),
 (4, 'Kent Erwin Camiling', 'kent', '$2y$10$mqoSAz2yjNHq/MJ1a8cvAOpYJs4tG8Ke19YbMsJ.Mg.RdqyBb89CW', 'Active', 'user', '09151877379', NULL);
 
 --
