@@ -1,591 +1,289 @@
-#include <DHT.h>
+// NodeMCU 1.0 (ESP-12E): Wi-Fi bridge for firmware/biosync_uno.
+// No sensors or relays attach to this board. D6 = RX, D7 = TX.
+#include <ESP8266WiFi.h>
+#include <ESP8266HTTPClient.h>
 #include <SoftwareSerial.h>
+#include "secrets.h"
+#include "protocol.h"
+#include "rx_guard.h"
 
-// ======================================================
-// BIO-SYNC SMART GREENHOUSE SYSTEM
-// Arduino Uno + DHT22 + ESP-01S
-// Fan + Water Pump + 3 Indicator LEDs
-// ======================================================
-
-// ---------------- WIFI SETTINGS ----------------
-const char* BIOSYNC_WIFI_SSID = "GAV's";
-const char* BIOSYNC_WIFI_PASSWORD = "eklavu@chervalu";
-const char* BIOSYNC_DEVICE_TOKEN = "YOUR_DEVICE_TOKEN";
-
-// ---------------- DHT22 SENSOR ----------------
-#define DHTPIN 2
-#define DHTTYPE DHT22
-DHT dht(DHTPIN, DHTTYPE);
-
-// ---------------- RELAYS ----------------
-const byte FAN_RELAY = 5;
-const byte PUMP_RELAY = 6;
-
-// ---------------- INDICATOR LEDS ----------------
-const byte ALERT_LED = 7;
-const byte FAN_LED = 4;
-const byte PUMP_LED = 3;
-
-// ---------------- ESP-01S ----------------
-// Arduino RX = D10 (connect to ESP TX)
-// Arduino TX = D11 (connect to ESP RX through level shifting)
-SoftwareSerial esp8266(10, 11);
-
-// Set true for active-LOW relay boards.
-const bool RELAY_ACTIVE_LOW = false;
-
-// ---------------- SERVER ----------------
-const char HOST[] = "192.168.68.84";
-const int HTTP_PORT = 80;
-
-// ---------------- THRESHOLDS ----------------
-float minTemperature = 24.0;
-float maxTemperature = 28.0;
-float minHumidity = 70.0;
-float maxHumidity = 85.0;
-
-// Dashboard commands
-int dashboardFanState = 0;
-int dashboardPumpState = 0;
-
-// ---------------- TIMING ----------------
-const unsigned long SENSOR_INTERVAL = 3000UL;
+const char* SERVER_URL = "http://192.168.43.178/mushroomsystem/api_update.php";
+SoftwareSerial unoLink(D6, D7); // RX from Uno D11 divider, TX to Uno D10.
+const unsigned long POST_INTERVAL = 5000UL;
+const unsigned long READING_TIMEOUT = 8000UL;
+const unsigned long WIFI_RETRY = 15000UL;
 const unsigned long LOG_INTERVAL = 10UL * 60UL * 1000UL;
+BioSync::LineBuffer incoming;
+BioSync::Reading reading = {0, 0};
+bool haveReading = false, firstLogPending = true;
+unsigned long lastReading = 0, lastPost = 0, lastWiFiTry = 0, lastLoggedAt = 0;
 
-// Server retry backoff (keeps local control responsive when server is down)
-const unsigned long RETRY_MIN = 3000UL;
-const unsigned long RETRY_MAX = 60000UL;
+// Retain event subscriptions. Callbacks only record codes; print from loop().
+WiFiEventHandler disconnectedHandler, associatedHandler, dhcpTimeoutHandler;
+bool disconnectPending = false, associationPending = false, dhcpTimeoutPending = false;
+uint8_t lastDisconnectReason = 0;
+int previousWiFiStatus = -1;
+unsigned long wifiAttempt = 0;
+unsigned long lastFrameWarning = 0;
+bool receivedFirstReading = false;
+const unsigned int SERIAL_BATCH_LIMIT = 64;
+bool receiverPaused = false;
+unsigned long receiverPausedAt = 0, receiverQuietSince = 0;
+const unsigned long RX_RECOVERY_MS = 100;
+static_assert(D6 == RxGuard::PIN, "Receive guard must match NodeMCU D6/GPIO12");
 
-// ---------------- PUMP SAFETY ----------------
-// Pump may run at most PUMP_MAX_RUN_MS continuously,
-// then must rest for PUMP_COOLDOWN_MS. Adjust to your setup.
-const unsigned long PUMP_MAX_RUN_MS = 2UL * 60UL * 1000UL;
-const unsigned long PUMP_COOLDOWN_MS = 5UL * 60UL * 1000UL;
-
-unsigned long lastSensorRead = 0;
-unsigned long lastLoggedAt = 0;
-bool firstLogPending = true;
-
-// Connectivity state
-bool wifiReady = false;
-unsigned long nextServerAttempt = 0;
-unsigned long retryDelay = RETRY_MIN;
-
-// Pump safety state
-bool pumpRunning = false;
-bool pumpCoolingDown = false;
-unsigned long pumpRunStart = 0;
-unsigned long pumpCooldownStart = 0;
-
-// ======================================================
-// RELAY CONTROL
-// ======================================================
-void setRelay(byte pin, bool turnOn) {
-  if (RELAY_ACTIVE_LOW) {
-    digitalWrite(pin, turnOn ? LOW : HIGH);
-  } else {
-    digitalWrite(pin, turnOn ? HIGH : LOW);
+const __FlashStringHelper *wifiStatusText(int status) {
+  switch (status) {
+    case WL_IDLE_STATUS: return F("IDLE - connecting or waiting for an address");
+    case WL_NO_SSID_AVAIL: return F("NO_SSID - network not found; check name/range");
+    case WL_CONNECTED: return F("CONNECTED - IP address obtained");
+    case WL_CONNECT_FAILED: return F("CONNECT_FAILED - inspect disconnect reason");
+    case WL_CONNECTION_LOST: return F("CONNECTION_LOST - link dropped");
+    case WL_WRONG_PASSWORD: return F("WRONG_PASSWORD - check credentials/security mode");
+    case WL_DISCONNECTED: return F("DISCONNECTED - not connected");
+    default: return F("OTHER - see numeric status");
   }
 }
 
-// ======================================================
-// SEND AT COMMAND AND READ RESPONSE
-// ======================================================
-String sendAT(const String &command, unsigned long timeout) {
-  while (esp8266.available()) {
-    esp8266.read();
+const __FlashStringHelper *wifiReasonText(uint8_t reason) {
+  switch (reason) {
+    case WIFI_DISCONNECT_REASON_NO_AP_FOUND:
+      return F("NO_AP_FOUND - check SSID, range and 2.4 GHz availability");
+    case WIFI_DISCONNECT_REASON_AUTH_FAIL:
+      return F("AUTH_FAIL - check password and router security/access rules");
+    case WIFI_DISCONNECT_REASON_ASSOC_FAIL:
+      return F("ASSOC_FAIL - router association rejected/failed");
+    case WIFI_DISCONNECT_REASON_4WAY_HANDSHAKE_TIMEOUT:
+    case WIFI_DISCONNECT_REASON_HANDSHAKE_TIMEOUT:
+      return F("HANDSHAKE_TIMEOUT - check password, security mode and signal");
+    case WIFI_DISCONNECT_REASON_BEACON_TIMEOUT:
+      return F("BEACON_TIMEOUT - lost router signal; check range/power");
+    case WIFI_DISCONNECT_REASON_AUTH_EXPIRE:
+      return F("AUTH_EXPIRE - authentication timed out");
+    case WIFI_DISCONNECT_REASON_AUTH_LEAVE:
+    case WIFI_DISCONNECT_REASON_ASSOC_LEAVE:
+      return F("LEAVE - station/router disconnected; may follow a local retry");
+    default:
+      return F("OTHER - retain numeric reason for troubleshooting");
   }
-
-  esp8266.println(command);
-
-  String response = "";
-  unsigned long start = millis();
-
-  while (millis() - start < timeout) {
-    while (esp8266.available()) {
-      if (response.length() >= 96) response.remove(0, 1);
-      response += (char)esp8266.read();
-    }
-
-    if (response.indexOf("OK") >= 0 ||
-        response.indexOf("ERROR") >= 0 ||
-        response.indexOf("FAIL") >= 0) {
-      break;
-    }
-  }
-
-  return response;
 }
 
-// ======================================================
-// ESP-01S INIT (auto-detects 9600 / 115200 baud)
-// ======================================================
-bool probeESP() {
-  for (byte i = 0; i < 2; i++) {
-    if (sendAT("AT", 1500).indexOf("OK") >= 0) return true;
+void printWiFiStatus() {
+  int status = WiFi.status();
+  Serial.print(F("[WiFi] status=")); Serial.print(status);
+  Serial.print(F(" ")); Serial.println(wifiStatusText(status));
+  if (status == WL_CONNECTED) {
+    Serial.print(F("[WiFi] IP=")); Serial.print(WiFi.localIP());
+    Serial.print(F(" RSSI=")); Serial.print(WiFi.RSSI());
+    Serial.print(F(" dBm channel=")); Serial.println(WiFi.channel());
   }
-  return false;
+  previousWiFiStatus = status;
 }
 
-bool initESP() {
-  esp8266.begin(9600);
-  if (probeESP()) return true;
-
-  // Many ESP-01S modules ship at 115200.
-  Serial.println(F("No reply at 9600, trying 115200..."));
-  esp8266.begin(115200);
-
-  if (probeESP()) {
-    Serial.println(F("ESP found at 115200. Switching it to 9600..."));
-    String r = sendAT("AT+UART_DEF=9600,8,1,0,0", 2000);
-    if (r.indexOf("OK") < 0) {
-      sendAT("AT+CIOBAUD=9600", 2000);  // older firmware
-    }
-    delay(500);
-    esp8266.begin(9600);
-    delay(300);
-    return probeESP();
+void reportWiFiEvents() {
+  if (associationPending) {
+    associationPending = false;
+    Serial.println(F("[WiFi] Associated with router; waiting for DHCP/IP."));
   }
-
-  esp8266.begin(9600);
-  return false;
+  if (disconnectPending) {
+    uint8_t reason = lastDisconnectReason;
+    disconnectPending = false;
+    Serial.print(F("[WiFi] disconnect reason=")); Serial.print(reason);
+    Serial.print(F(" ")); Serial.println(wifiReasonText(reason));
+  }
+  if (dhcpTimeoutPending) {
+    dhcpTimeoutPending = false;
+    Serial.println(F("[WiFi] DHCP_TIMEOUT - router did not assign an IP address."));
+  }
+  if ((int)WiFi.status() != previousWiFiStatus) printWiFiStatus();
 }
 
-// ======================================================
-// WIFI CONNECTION
-// ======================================================
-bool wifiJoined() {
-  String r = sendAT("AT+CWJAP?", 3000);
-  return r.indexOf("+CWJAP:") >= 0 && r.indexOf("No AP") < 0;
+void beginWiFiAttempt() {
+  ++wifiAttempt;
+  Serial.print(F("[WiFi] Association attempt #")); Serial.println(wifiAttempt);
+  if (WIFI_SSID[0] == '\0') Serial.println(F("[WiFi] SSID is empty; edit secrets.h and reupload."));
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
+  lastWiFiTry = millis();
 }
 
-bool connectWiFi() {
-  Serial.println(F("Checking ESP-01S..."));
-
-  if (!initESP()) {
-    Serial.println(F("ESP-01S not responding (check power, wiring, baud)."));
-    return false;
-  }
-
-  Serial.println(F("ESP-01S OK"));
-
-  sendAT("ATE0", 2000);
-
-  String response = sendAT("AT+CWMODE=1", 3000);
-  if (response.indexOf("OK") < 0) {
-    Serial.println(F("Could not set Wi-Fi mode."));
-    return false;
-  }
-
-  String joinCommand =
-      "AT+CWJAP=\"" + String(BIOSYNC_WIFI_SSID) +
-      "\",\"" + String(BIOSYNC_WIFI_PASSWORD) + "\"";
-
-  Serial.println(F("Connecting to Wi-Fi..."));
-  response = sendAT(joinCommand, 20000);
-
-  if (response.indexOf("OK") < 0) {
-    Serial.println(F("Wi-Fi connection failed."));
-    Serial.println(response);
-    return false;
-  }
-
-  Serial.println(F("WIFI CONNECTED"));
-  return true;
-}
-
-// ======================================================
-// PARSE FLOAT FROM SERVER RESPONSE
-// ======================================================
-float responseFloat(const String &response, const char *key, float fallback) {
-  int start = response.indexOf(key);
-  if (start < 0) return fallback;
-
-  start += strlen(key);
-
-  int end = response.indexOf(',', start);
-  int lineEnd = response.indexOf('\r', start);
-  int nextLine = response.indexOf('\n', start);
-
-  if (end < 0 || (lineEnd >= 0 && lineEnd < end)) end = lineEnd;
-  if (end < 0 || (nextLine >= 0 && nextLine < end)) end = nextLine;
-  if (end < 0) end = response.length();
-
-  String value = response.substring(start, end);
-  value.trim();
-  return value.toFloat();
-}
-
-// ======================================================
-// PARSE DASHBOARD COMMANDS
-// Expected: CMD:FAN=1,PUMP=0,MIN_TEMP=24,MAX_TEMP=28,MIN_HUM=70,MAX_HUM=85
-// ======================================================
-void parseServerCommands(const String &response) {
-  int fanIndex = response.indexOf("FAN=");
-  int pumpIndex = response.indexOf("PUMP=");
-
-  if (fanIndex < 0 || pumpIndex < 0) {
-    Serial.println(F("No dashboard commands received."));
-    return;
-  }
-
-  dashboardFanState = response.substring(fanIndex + 4, fanIndex + 5).toInt();
-  dashboardPumpState = response.substring(pumpIndex + 5, pumpIndex + 6).toInt();
-
-  dashboardFanState = constrain(dashboardFanState, 0, 1);
-  dashboardPumpState = constrain(dashboardPumpState, 0, 1);
-
-  float newMinT = responseFloat(response, "MIN_TEMP=", minTemperature);
-  float newMaxT = responseFloat(response, "MAX_TEMP=", maxTemperature);
-  float newMinH = responseFloat(response, "MIN_HUM=", minHumidity);
-  float newMaxH = responseFloat(response, "MAX_HUM=", maxHumidity);
-
-  // Ignore nonsensical limits from the server.
-  if (newMinT < newMaxT) { minTemperature = newMinT; maxTemperature = newMaxT; }
-  if (newMinH < newMaxH) { minHumidity = newMinH; maxHumidity = newMaxH; }
-
-  Serial.println(F("DASHBOARD SYNC OK"));
-  Serial.print(F("Dashboard FAN: "));
-  Serial.println(dashboardFanState);
-  Serial.print(F("Dashboard PUMP: "));
-  Serial.println(dashboardPumpState);
-  Serial.print(F("Temperature limits: "));
-  Serial.print(minTemperature);
-  Serial.print(F(" - "));
-  Serial.println(maxTemperature);
-  Serial.print(F("Humidity limits: "));
-  Serial.print(minHumidity);
-  Serial.print(F(" - "));
-  Serial.println(maxHumidity);
-}
-
-// Print-compatible byte counter avoids allocating a complete HTTP request.
-class RequestCounter : public Print {
+// HTTPClient decodes chunked replies into this fixed buffer. Oversize replies fail.
+class ReplyBuffer : public Stream {
 public:
+  using Print::write;
+  char data[128] = {0};
   size_t length = 0;
-  size_t write(uint8_t) override { ++length; return 1; }
+  bool overflow = false;
+  int availableForWrite() override {
+    size_t remaining = sizeof(data) - 1 - length;
+    if (!remaining) overflow = true; // Full/unknown-length replies fail closed.
+    return (int)remaining;
+  }
+  bool outputCanTimeout() override { return false; }
+  size_t write(const uint8_t *buffer, size_t size) override {
+    size_t copied = 0;
+    while (copied < size && write(buffer[copied])) ++copied;
+    return copied;
+  }
+  size_t write(uint8_t c) override {
+    if (length >= sizeof(data) - 1) { overflow = true; return 0; }
+    data[length++] = c;
+    data[length] = '\0';
+    return 1;
+  }
+  int available() override { return 0; }
+  int read() override { return -1; }
+  int peek() override { return -1; }
+  void flush() override {}
 };
 
-void writeRequest(Print &output, const String &body) {
-  output.print(F("POST /mushroomsystem/api_update.php HTTP/1.1\r\n"));
-  output.print(F("Host: "));
-  output.print(HOST);
-  output.print(F("\r\n"));
-  output.print(F("X-Device-Token: "));
-  output.print(BIOSYNC_DEVICE_TOKEN);
-  output.print(F("\r\n"));
-  output.print(F("Content-Type: application/x-www-form-urlencoded\r\n"));
-  output.print(F("Content-Length: "));
-  output.print(body.length());
-  output.print(F("\r\nConnection: close\r\n\r\n"));
-  output.print(body);
+void readUno() {
+  if (RxGuard::tripped() && !receiverPaused) {
+    // The ISR has already masked D6. Drain only after GPIO receive interrupts
+    // are detached, so new transitions cannot starve this recovery path.
+    unoLink.enableRx(false);
+    receiverPaused = true;
+    receiverPausedAt = millis();
+    receiverQuietSince = millis();
+    haveReading = false;
+    incoming.length = 0;
+    incoming.dropping = true; // Resynchronize through the next newline.
+    yield();
+    (void)unoLink.available(); // Decode a finite snapshot with D6 detached.
+    unoLink.flush();
+    unoLink.println(F("ERR:LINK")); // Uno immediately applies its existing fail-safe.
+    if (millis() - lastFrameWarning >= 5000UL) {
+      lastFrameWarning = millis();
+      Serial.println(F("[Uno] D6 interrupt flood blocked; readings discarded, RX cooling down."));
+    }
+  }
+  if (receiverPaused) {
+    // Do not reattach to a continuously LOW/faulted line. Require idle HIGH
+    // for two character times after a cooldown, then retry normal reception.
+    unsigned long now = millis();
+    if (digitalRead(D6) == LOW) receiverQuietSince = now;
+    if (now - receiverPausedAt >= RX_RECOVERY_MS && now - receiverQuietSince >= 3UL) {
+      receiverPaused = false;
+      unoLink.enableRx(true); // Also resets the guard via attachInterruptArg.
+    }
+    yield();
+    return;
+  }
+  unsigned int processed = 0;
+  // Bound each pass even if a noisy link continuously supplies data.
+  while (processed < SERIAL_BATCH_LIMIT && !RxGuard::tripped() && unoLink.available()) {
+    ++processed;
+    if (incoming.push((char)unoLink.read())) {
+      BioSync::Reading candidate;
+      if (BioSync::parseReading(incoming.data, candidate)) {
+        reading = candidate;
+        lastReading = millis();
+        haveReading = true;
+        if (!receivedFirstReading) {
+          receivedFirstReading = true;
+          Serial.println(F("[Uno] First valid readings received."));
+        }
+      } else {
+        haveReading = false;
+        if (millis() - lastFrameWarning >= 5000UL) {
+          lastFrameWarning = millis();
+          Serial.println(F("Uno sensor/frame fault; no POST (check wiring/ground/divider)"));
+        }
+      }
+    }
+  }
+  yield(); // Service Wi-Fi/watchdog between bounded serial batches.
 }
 
-// ======================================================
-// SEND SENSOR DATA TO PHP SERVER
-// ======================================================
-bool sendDataToServer(float temperature, float humidity, bool logReading) {
-  String body =
-      "temp=" + String(temperature, 1) +
-      "&hum=" + String(humidity, 1) +
-      "&log=" + String(logReading ? 1 : 0);
+bool freshReading() {
+  return !RxGuard::tripped() && !receiverPaused && haveReading
+      && millis() - lastReading < READING_TIMEOUT;
+}
 
-  RequestCounter counter;
-  writeRequest(counter, body);
-
-  Serial.println(F("Connecting to server..."));
-
-  String response = sendAT(
-      "AT+CIPSTART=\"TCP\",\"" + String(HOST) + "\"," + String(HTTP_PORT),
-      8000);
-
-  if (response.indexOf("CONNECT") < 0 &&
-      response.indexOf("ALREADY CONNECTED") < 0) {
-    Serial.println(F("TCP CONNECTION FAILED"));
-    Serial.println(response);
-    sendAT("AT+CIPCLOSE", 1000);
-
-    // Empty reply = ESP silent; otherwise check if Wi-Fi was lost.
-    if (response.length() == 0 || !wifiJoined()) {
-      Serial.println(F("Wi-Fi/ESP link lost. Will reconnect."));
-      wifiReady = false;
-    }
+bool sendDataToServer(float temp, float hum, bool logReading) {
+  if (BIOSYNC_DEVICE_TOKEN[0] == '\0') {
+    Serial.println(F("Set BIOSYNC_DEVICE_TOKEN in secrets.h to match Apache."));
     return false;
   }
-
-  Serial.println(F("TCP CONNECTED"));
-
-  esp8266.print(F("AT+CIPSEND="));
-  esp8266.println(counter.length);
-
-  unsigned long start = millis();
-  bool prompt = false;
-  String promptResponse = "";
-
-  while (millis() - start < 5000) {
-    while (esp8266.available()) {
-      char c = esp8266.read();
-      if (promptResponse.length() >= 32) promptResponse.remove(0, 1);
-      promptResponse += c;
-      if (c == '>') {
-        prompt = true;
-        break;
-      }
+  WiFiClient client;
+  HTTPClient http;
+  http.setTimeout(1500);
+  if (!http.begin(client, SERVER_URL)) return false;
+  http.addHeader("Content-Type", "application/x-www-form-urlencoded");
+  http.addHeader("X-Device-Token", BIOSYNC_DEVICE_TOKEN);
+  String body = "temp=" + String(temp, 1) + "&hum=" + String(hum, 1)
+              + "&log=" + String(logReading ? 1 : 0);
+  Serial.print(F("[HTTP] Starting POST; free heap=")); Serial.println(ESP.getFreeHeap());
+  int code = http.POST(body);
+  Serial.print(F("POST -> HTTP ")); Serial.println(code);
+  ReplyBuffer reply;
+  bool ok = false;
+  if (code == HTTP_CODE_OK) {
+    Serial.println(F("[HTTP] Reading bounded command reply"));
+    // Reject known oversize bodies before transfer; chunked/unknown sizes are
+    // limited by availableForWrite() and rejected if the buffer fills.
+    if (http.getSize() < (int)sizeof(reply.data) - 1) {
+      int bytes = http.writeToStream(&reply);
+      BioSync::Command validated;
+      ok = bytes > 0 && !reply.overflow && BioSync::parseCommand(reply.data, validated);
     }
-
-    if (prompt) break;
-
-    if (promptResponse.indexOf("ERROR") >= 0 ||
-        promptResponse.indexOf("FAIL") >= 0) {
-      break;
-    }
+    Serial.print(F("[HTTP] Reply validated=")); Serial.println(ok ? F("yes") : F("no"));
+  } else if (code == 403) {
+    Serial.println(F("Device token rejected; check Apache BIOSYNC_DEVICE_TOKEN."));
   }
-
-  if (!prompt) {
-    Serial.println(F("CIPSEND FAILED"));
-    Serial.println(promptResponse);
-    sendAT("AT+CIPCLOSE", 1000);
-    return false;
-  }
-
-  writeRequest(esp8266, body);
-
-  String serverResponse = "";
-  bool httpOK = false;
-  start = millis();
-
-  while (millis() - start < 8000) {
-    while (esp8266.available()) {
-      if (serverResponse.length() >= 192) serverResponse.remove(0, 1);
-      serverResponse += (char)esp8266.read();
-      if (serverResponse.indexOf("HTTP/1.1 200 ") >= 0 ||
-          serverResponse.indexOf("HTTP/1.0 200 ") >= 0) {
-        httpOK = true;
-      }
-    }
-
-    if (serverResponse.indexOf("\r\nCLOSED") >= 0 ||
-        serverResponse.endsWith("CLOSED")) {
-      break;
-    }
-  }
-
-  Serial.println(F("SERVER RESPONSE:"));
-  Serial.println(serverResponse);
-
-  httpOK = httpOK &&
-           serverResponse.indexOf("CMD:") >= 0 &&
-           serverResponse.indexOf("MAX_HUM=") >= 0;
-
-  if (httpOK) {
-    parseServerCommands(serverResponse);
+  http.end();
+  readUno(); // Discard a response if the Uno reported a sensor fault meanwhile.
+  if (ok && freshReading()) {
+    unoLink.println(reply.data);
+    Serial.println(F("Validated server command forwarded to Uno"));
   } else {
-    Serial.println(F("HTTP REQUEST FAILED OR SERVER ERROR"));
+    unoLink.println(F("ERR:SERVER"));
+    Serial.println(F("No valid command; Uno outputs off"));
   }
-
-  sendAT("AT+CIPCLOSE", 1000);
-  return httpOK;
+  return ok; // Successful POST is logged even if the serial link became stale.
 }
 
-// ======================================================
-// PUMP SAFETY (max run time + cooldown)
-// ======================================================
-bool applyPumpSafety(bool wantPump) {
-  unsigned long now = millis();
-
-  if (pumpCoolingDown) {
-    if (now - pumpCooldownStart >= PUMP_COOLDOWN_MS) {
-      pumpCoolingDown = false;
-    } else {
-      return false;
-    }
-  }
-
-  if (!wantPump) {
-    pumpRunning = false;
-    return false;
-  }
-
-  if (!pumpRunning) {
-    pumpRunning = true;
-    pumpRunStart = now;
-    return true;
-  }
-
-  if (now - pumpRunStart >= PUMP_MAX_RUN_MS) {
-    pumpRunning = false;
-    pumpCoolingDown = true;
-    pumpCooldownStart = now;
-    Serial.println(F("[SAFETY] PUMP MAX RUN TIME REACHED - COOLDOWN"));
-    return false;
-  }
-
-  return true;
-}
-
-// ======================================================
-// AUTOMATIC TEMPERATURE AND HUMIDITY CONTROL
-// ======================================================
-void updateOutputs(float temperature, float humidity) {
-  bool highTemp = temperature > maxTemperature;
-  bool lowTemp = temperature < minTemperature;
-  bool highHumidity = humidity > maxHumidity;
-  bool lowHumidity = humidity < minHumidity;
-
-  bool fanOn = dashboardFanState == 1;
-  bool pumpWanted = dashboardPumpState == 1;
-
-  if (highTemp) {
-    fanOn = true;
-    Serial.println(F("[OVERRIDE] HIGH TEMPERATURE"));
-  }
-
-  if (lowTemp) {
-    Serial.println(F("[ALERT] LOW TEMPERATURE"));
-  }
-
-  if (lowHumidity) {
-    pumpWanted = true;
-    Serial.println(F("[OVERRIDE] LOW HUMIDITY - PUMP ON"));
-  }
-
-  if (highHumidity) {
-    fanOn = true;
-    pumpWanted = false;
-    Serial.println(F("[OVERRIDE] HIGH HUMIDITY - FAN ON"));
-  }
-
-  bool pumpOn = applyPumpSafety(pumpWanted);
-
-  bool alertOn = highTemp || lowTemp || highHumidity || lowHumidity;
-
-  setRelay(FAN_RELAY, fanOn);
-  setRelay(PUMP_RELAY, pumpOn);
-
-  digitalWrite(FAN_LED, fanOn ? HIGH : LOW);
-  digitalWrite(PUMP_LED, pumpOn ? HIGH : LOW);
-  digitalWrite(ALERT_LED, alertOn ? HIGH : LOW);
-
-  Serial.print(F("FAN: "));
-  Serial.print(fanOn ? F("ON") : F("OFF"));
-  Serial.print(F(" | PUMP: "));
-  Serial.print(pumpOn ? F("ON") : F("OFF"));
-  Serial.print(F(" | ALERT: "));
-  Serial.println(alertOn ? F("ON") : F("OFF"));
-}
-
-// ======================================================
-// SETUP
-// ======================================================
 void setup() {
-  Serial.begin(9600);
-
-  pinMode(FAN_RELAY, OUTPUT);
-  pinMode(PUMP_RELAY, OUTPUT);
-  pinMode(ALERT_LED, OUTPUT);
-  pinMode(FAN_LED, OUTPUT);
-  pinMode(PUMP_LED, OUTPUT);
-
-  setRelay(FAN_RELAY, false);
-  setRelay(PUMP_RELAY, false);
-
-  digitalWrite(ALERT_LED, LOW);
-  digitalWrite(FAN_LED, LOW);
-  digitalWrite(PUMP_LED, LOW);
-
-  dht.begin();
-
-  delay(2000);
-
+  Serial.begin(115200);
   Serial.println();
-  Serial.println(F("================================"));
-  Serial.println(F("BIO-SYNC SYSTEM STARTING"));
-  Serial.println(F("================================"));
-
-  wifiReady = connectWiFi();
-
-  if (wifiReady) {
-    Serial.println(F("Wi-Fi status:"));
-    Serial.println(sendAT("AT+CWJAP?", 3000));
-  } else {
-    Serial.println(F("Starting offline. Will keep retrying Wi-Fi."));
-  }
-
-  Serial.println(F("Starting sensor monitoring..."));
+  Serial.print(F("[Boot] Reset reason: ")); Serial.println(ESP.getResetReason());
+  Serial.print(F("[Boot] Free heap: ")); Serial.println(ESP.getFreeHeap());
+  unoLink.begin(9600);
+  WiFi.persistent(false);
+  disconnectedHandler = WiFi.onStationModeDisconnected(
+      [](const WiFiEventStationModeDisconnected &event) {
+        lastDisconnectReason = (uint8_t)event.reason;
+        disconnectPending = true;
+      });
+  associatedHandler = WiFi.onStationModeConnected(
+      [](const WiFiEventStationModeConnected &) { associationPending = true; });
+  dhcpTimeoutHandler = WiFi.onStationModeDHCPTimeout(
+      []() { dhcpTimeoutPending = true; });
+  WiFi.mode(WIFI_STA);
+  beginWiFiAttempt();
+  printWiFiStatus();
+  Serial.println(F("BioSync NodeMCU bridge ready; D6 IRQ guard enabled; waiting for Uno readings."));
 }
 
-// ======================================================
-// MAIN LOOP
-// ======================================================
 void loop() {
-  if (millis() - lastSensorRead < SENSOR_INTERVAL) {
+  readUno();
+  reportWiFiEvents();
+  unsigned long now = millis();
+  if (WiFi.status() != WL_CONNECTED) {
+    if (now - lastWiFiTry >= WIFI_RETRY) {
+      Serial.println(F("[WiFi] Still offline after 15 s; retrying Wi-Fi association."));
+      printWiFiStatus();
+      beginWiFiAttempt();
+    }
+    yield();
     return;
   }
-
-  lastSensorRead = millis();
-
-  float humidity = dht.readHumidity();
-  float temperature = dht.readTemperature();
-
-  // Fail-safe if sensor readings are invalid.
-  if (isnan(humidity) || isnan(temperature)) {
-    Serial.println(F("DHT22 SENSOR FAILED!"));
-
-    pumpRunning = false;
-    setRelay(FAN_RELAY, false);
-    setRelay(PUMP_RELAY, false);
-
-    digitalWrite(FAN_LED, LOW);
-    digitalWrite(PUMP_LED, LOW);
-    digitalWrite(ALERT_LED, HIGH);
-
-    Serial.println(F("FAILSAFE: FAN OFF, PUMP OFF, ALERT ON"));
-    return;
+  if (freshReading() && now - lastPost >= POST_INTERVAL) {
+    lastPost = now;
+    bool logReading = firstLogPending || now - lastLoggedAt >= LOG_INTERVAL;
+    if (sendDataToServer(reading.temperature, reading.humidity, logReading) && logReading) {
+      firstLogPending = false;
+      lastLoggedAt = millis();
+    }
   }
-
-  Serial.println();
-  Serial.print(F("TEMP: "));
-  Serial.print(temperature, 1);
-  Serial.print(F(" C | HUM: "));
-  Serial.print(humidity, 1);
-  Serial.println(F(" %"));
-
-  // 1) Local control first, so outputs never wait on the network.
-  updateOutputs(temperature, humidity);
-
-  // 2) Network sync, only when due (backoff after failures).
-  if ((long)(millis() - nextServerAttempt) >= 0) {
-    if (!wifiReady) {
-      wifiReady = connectWiFi();
-    }
-
-    bool serverOK = false;
-
-    if (wifiReady) {
-      bool logReading =
-          firstLogPending || millis() - lastLoggedAt >= LOG_INTERVAL;
-
-      serverOK = sendDataToServer(temperature, humidity, logReading);
-
-      if (serverOK && logReading) {
-        lastLoggedAt = millis();
-        firstLogPending = false;
-      }
-    }
-
-    if (serverOK) {
-      retryDelay = RETRY_MIN;
-      // Apply any new dashboard commands/limits right away.
-      updateOutputs(temperature, humidity);
-    } else {
-      retryDelay = min(retryDelay * 2, RETRY_MAX);
-      Serial.print(F("Next server attempt in "));
-      Serial.print(retryDelay / 1000);
-      Serial.println(F(" s"));
-    }
-
-    nextServerAttempt = millis() + retryDelay;
-  }
-
-  Serial.println(F("--------------------------------"));
+  yield();
 }

@@ -58,6 +58,8 @@ prof  = read("profile.php")
 umgmt = read("usermanagement.php")
 login = read("login.php")
 sketch= read(os.path.join("sketch_may16a", "sketch_may16a.ino"))
+uno = read("firmware/biosync_uno/biosync_uno.ino")
+protocol = read("sketch_may16a/protocol.h")
 
 # -------------------------------------------------------------
 print("=== 1. Dashboard JS live-update contract vs live_data.php ===")
@@ -119,7 +121,11 @@ check("ml_widget retains algorithm and stage details in its header",
 # -------------------------------------------------------------
 print("=== 5. api_update.php <-> Arduino sketch contract ===")
 check("api_update echoes CMD:FAN=,PUMP=", "CMD:FAN={$fanState},PUMP={$pumpState}" in api)
-check("Arduino parses FAN= and PUMP=", '"FAN="' in sketch and '"PUMP="' in sketch)
+check("Uno and NodeMCU share the exact command and reading protocol",
+      protocol == read("firmware/biosync_uno/protocol.h")
+      and '"CMD:FAN="' in protocol and '",PUMP="' in protocol
+      and 'BioSync::parseCommand' in uno and 'BioSync::parseCommand' in sketch
+      and 'BioSync::parseReading' in sketch)
 check("api_update validates sensor ranges",
       "$temperature < -10" in api and "$humidity < 0 || $humidity > 100" in api)
 check("api_update requires POST, a configured device token, and numeric values",
@@ -128,12 +134,19 @@ check("api_update requires POST, a configured device token, and numeric values",
       and "is_numeric($temperatureRaw)" in api
       and "is_numeric($humidityRaw)" in api)
 check("Arduino sends authenticated form-encoded POST data",
-      '"POST /mushroomsystem/api_update.php HTTP/1.1' in sketch
-      and '"X-Device-Token: "' in sketch
-      and '"Content-Type: application/x-www-form-urlencoded' in sketch)
+      'http.POST(body)' in sketch
+      and 'http.addHeader("X-Device-Token", BIOSYNC_DEVICE_TOKEN)' in sketch
+      and 'http.addHeader("Content-Type", "application/x-www-form-urlencoded")' in sketch
+      and '"temp=" + String(temp, 1)' in sketch
+      and '"&hum=" + String(hum, 1)' in sketch)
+check("ESP8266 targets the LAN server and loads private configuration",
+      'http://192.168.43.178/mushroomsystem/api_update.php' in sketch
+      and '#include "secrets.h"' in sketch
+      and 'BIOSYNC_DEVICE_TOKEN[0]' in sketch
+      and 'const char* WIFI_PASS' not in sketch)
 check("firmware requests sensor-log persistence every 10 minutes",
       "10UL * 60UL * 1000UL" in sketch
-      and "sendDataToServer(temperature, humidity, logReading)" in sketch
+      and "sendDataToServer(reading.temperature, reading.humidity, logReading)" in sketch
       and '"&log=" + String(logReading ? 1 : 0)' in sketch)
 check("api_update honors firmware log flag while preserving legacy clients",
       "$shouldLog = !isset($_POST['log']) || (string)$_POST['log'] !== '0';" in api
@@ -146,9 +159,52 @@ check("api_update inserts stage column into sensor_logs",
       "INSERT INTO sensor_logs (device_id, recorded_value, recorded_at, stage)" in api)
 check("sketch posts to /mushroomsystem/api_update.php",
       "/mushroomsystem/api_update.php" in sketch)
-check("Arduino updates its local safety thresholds from the selected stage",
-      all(f'responseFloat(response, "{key}="' in sketch
-          for key in ["MIN_TEMP", "MAX_TEMP", "MIN_HUM", "MAX_HUM"]))
+check("Uno updates all stage thresholds from a complete validated server record",
+      all(f'",{key}="' in protocol for key in ["MIN_TEMP", "MAX_TEMP", "MIN_HUM", "MAX_HUM"])
+      and "command = candidate" in uno and "command.maxHum" in uno)
+check("Uno pin map matches two-board wiring",
+      all(token in uno for token in ["DHT_PIN = 2", "FAN_RELAY = 4", "PUMP_RELAY = 5",
+                                    "FAN_LED = 8", "PUMP_LED = 9", "nodeLink(10, 11)"])
+      and "unoLink(D6, D7)" in sketch)
+check("Uno owns pump deadline and stale-command fail-safe independently of networking",
+      "COMMAND_TIMEOUT = 30000UL" in uno and "PUMP_MAX_RUN_MS = 30000UL" in uno
+      and "now - lastCommand < COMMAND_TIMEOUT" in uno
+      and "now - pumpStarted >= PUMP_MAX_RUN_MS" in uno
+      and "ESP8266HTTPClient" not in uno and "delay(" not in uno)
+check("Serial and HTTP responses are bounded and invalid records cannot partially apply",
+      "char data[128]" in protocol and "dropping = true" in protocol
+      and "*p != '\\0'" in protocol and "result = c" in protocol
+      and "isfinite(value)" in protocol and "!reply.overflow" in sketch)
+
+check("NodeMCU HTTP sink exposes finite write capacity to ESP8266 stream transfers",
+      "int availableForWrite() override" in sketch
+      and "sizeof(data) - 1 - length" in sketch
+      and "bool outputCanTimeout() override { return false; }" in sketch
+      and "http.getSize() < (int)sizeof(reply.data) - 1" in sketch
+      and "char data[128] = {0}" in sketch)
+check("NodeMCU yields after bounded serial processing and rate-limits invalid frames",
+      "processed < SERIAL_BATCH_LIMIT" in sketch
+      and "SERIAL_BATCH_LIMIT = 64" in sketch
+      and "yield();" in sketch.split("void readUno()", 1)[1].split("bool freshReading()", 1)[0]
+      and "millis() - lastFrameWarning >= 5000UL" in sketch)
+
+guard = read("sketch_may16a/rx_guard.cpp")
+guard_config = read("sketch_may16a/rx_guard.h")
+check("D6 interrupt budget allows normal 9600-baud traffic with margin",
+      int(re.search(r"EDGE_LIMIT = (\d+)", guard_config).group(1))
+      > 9600 * int(re.search(r"WINDOW_US = (\d+)", guard_config).group(1)) / 1000000 + 1)
+check("D6 guard masks only GPIO12 before returning from an overloaded ISR",
+      "IRAM_ATTR guardedReceiverISR" in guard
+      and "GPC(RxGuard::PIN) &= ~(0xF << GPCI)" in guard
+      and guard.index("receiverTripped = true") < guard.index("if (receiverISR)")
+      and "pin != RxGuard::PIN" in guard
+      and "__attachInterruptArg(pin, handler, arg, mode)" in guard)
+check("D6 recovery rejects stale readings and preserves Uno fail-safe on link errors",
+      "!RxGuard::tripped() && !receiverPaused && haveReading" in sketch
+      and "unoLink.enableRx(false)" in sketch
+      and "incoming.dropping = true" in sketch
+      and "RX_RECOVERY_MS = 100" in sketch
+      and '"ERR:LINK"' in sketch and "commandValid = false" in uno)
 
 # -------------------------------------------------------------
 print("=== 6. Stage system consistency (thresholds in all 3 places) ===")

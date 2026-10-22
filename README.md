@@ -88,18 +88,21 @@ Before training, select `BIOSYNC_DB_PROFILE=local` or `online` and set that prof
 variables. Use a database account with read-only access to the trainer's source tables;
 do not put database credentials in the repository.
 
-### 3. Arduino hardware
+### 3. Arduino Uno + NodeMCU hardware
 
-| Component                    | Pin                      |
-| ---------------------------- | ------------------------ |
-| DHT22 data                   | D2                       |
-| Ventilation fan (relay)      | D5                       |
-| Water pump (relay)           | D6                       |
-| Alert indicator (LED/buzzer) | D7                       |
-| ESP8266 TX/RX                | D10/D11 (SoftwareSerial) |
+Upload `firmware/biosync_uno/biosync_uno.ino` to the **Uno** and
+`sketch_may16a/sketch_may16a.ino` to the **NodeMCU ESP-12E**. The Uno reads
+DHT22 on D2, drives active-LOW fan/pump relays on D4/D5, and LEDs on D8/D9.
+Uno D10 RX connects to NodeMCU D7 TX; Uno D11 TX connects through a 1k/2k
+voltage divider to NodeMCU D6 RX. Share ground. The serial link is 9600 baud;
+both USB Serial Monitors use 115200 baud.
 
-Copy `sketch_may16a/secrets.h.example` to `sketch_may16a/secrets.h` (ignored by Git), then set the local WiFi name, password, and a long random device token there. Set the same token as the Apache environment variable `BIOSYNC_DEVICE_TOKEN` before starting Apache. Set the XAMPP server IP in the sketch and upload it. The sketch sends sensor data via authenticated POST; unauthenticated requests are rejected.
-
+See [firmware setup, power, upload and bench checks](firmware/README.md).
+Disconnect the Uno 5V-to-NodeMCU VIN jumper when powering both boards by USB.
+Keep Wi-Fi credentials and the matching Apache `BIOSYNC_DEVICE_TOKEN` in the
+ignored `sketch_may16a/secrets.h`. Set the laptop Wi-Fi IP in the NodeMCU sketch.
+Both relays remain off until a valid server command arrives and turn off on a
+sensor fault or when the last valid command is 30 seconds old.
 ## ⚙️ Configuration
 
 Thresholds live in the `system_settings` database table and can be tuned from the dashboard:
@@ -113,7 +116,7 @@ Thresholds live in the `system_settings` database table and can be tuned from th
 The dashboard stores the selected stage and its thresholds in `system_settings`; the hardware API returns the active thresholds to the firmware so its local safety overrides stay in sync.
 
 - **SMS**: paste your Semaphore API key into `sendSMS()` in `dashboard.php` / `historicaldatapage.php`. All active users with a phone number on file receive alerts.
-- **Arduino overrides**: the firmware enforces the same thresholds locally, so safety automation continues even if the server is unreachable.
+- **Arduino overrides**: the firmware enforces the same thresholds locally, so automatic overrides use the most recent valid thresholds; both relays turn off after 30 seconds without a valid server command.
 
 ## 🔌 API Reference
 
