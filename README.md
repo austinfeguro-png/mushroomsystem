@@ -29,7 +29,7 @@ Bio-Sync is an IoT system that monitors temperature and humidity in a growing en
 
 Three components work together:
 
-1. **Arduino firmware** (`sketch_may16a/`) — reads the DHT22 sensor and applies local safety rules every 3 s. It polls the PHP API for control commands each loop, while the API saves paired temperature/humidity history every 10 minutes.
+1. **Uno firmware** (`firmware/uno/`) — reads the DHT22, controls relays and LEDs, and sends readings over serial to the ESP-12E. **ESP bridge** (`firmware/esp12e/`) — forwards readings to the PHP API and passes validated commands back to the Uno.
 2. **PHP web app** (repo root) — dashboard, authentication, user management, notifications, SMS dispatch, and the hardware ingest endpoint.
 3. **Python ML service** (`biosync_ml/`) — trains classifiers from logged sensor data and exposes a prediction API the dashboard queries.
 
@@ -51,8 +51,11 @@ Three components work together:
 │   ├── biosync_models.pkl    # Trained model set (generated; preferred)
 │   ├── biosync_model.pkl     # Legacy single-model fallback
 │   └── ml_results.json       # Model comparison metrics (generated)
-└── sketch_may16a/
-    └── sketch_may16a.ino     # Arduino firmware
+└── firmware/
+    ├── uno/                 # Arduino Uno sketch + shared protocol parser
+    ├── esp12e/              # ESP-12E sketch + shared protocol and secrets example
+    ├── wiring_uno_esp12e_bridge.svg
+    └── README.md            # Setup, power, upload, and bench checks
 ```
 
 ## 🛠️ Setup
@@ -90,8 +93,9 @@ do not put database credentials in the repository.
 
 ### 3. Arduino Uno + NodeMCU hardware
 
-Upload `firmware/biosync_uno/biosync_uno.ino` to the **Uno** and
-`sketch_may16a/sketch_may16a.ino` to the **NodeMCU ESP-12E**. The Uno reads
+Upload `firmware/uno/uno.ino` to the **Uno** and
+`firmware/esp12e/esp12e.ino` to the **ESP-12E** (use the
+NodeMCU 1.0 ESP-12E board profile). The Uno reads
 DHT22 on D2, drives active-LOW fan/pump relays on D4/D5, and LEDs on D8/D9.
 Uno D10 RX connects to NodeMCU D7 TX; Uno D11 TX connects through a 1k/2k
 voltage divider to NodeMCU D6 RX. Share ground. The serial link is 9600 baud;
@@ -100,7 +104,8 @@ both USB Serial Monitors use 115200 baud.
 See [firmware setup, power, upload and bench checks](firmware/README.md).
 Disconnect the Uno 5V-to-NodeMCU VIN jumper when powering both boards by USB.
 Keep Wi-Fi credentials and the matching Apache `BIOSYNC_DEVICE_TOKEN` in the
-ignored `sketch_may16a/secrets.h`. Set the laptop Wi-Fi IP in the NodeMCU sketch.
+ignored `firmware/esp12e/secrets.h`. Set the laptop Wi-Fi IP in the ESP bridge
+sketch. See [the wiring diagram](firmware/wiring_uno_esp12e_bridge.svg).
 Both relays remain off until a valid server command arrives and turn off on a
 sensor fault or when the last valid command is 30 seconds old.
 ## ⚙️ Configuration

@@ -58,6 +58,13 @@ $temperature = (float)($devices['Temperature Node 1'] ?? 0.0);
 $humidity    = (float)($devices['Humidity Node 1']    ?? 0.0);
 $fanState    = ($devices['Ventilation Fan'] ?? '0') == '1';
 $pumpState   = ($devices['Water Pump']      ?? '0') == '1';
+$fanMode     = ($settings['fan_control_mode'] ?? 'auto') === 'manual' ? 'manual' : 'auto';
+$pumpMode    = ($settings['pump_control_mode'] ?? 'auto') === 'manual' ? 'manual' : 'auto';
+$fanRequested  = $fanMode === 'manual' && ($settings['fan_manual_state'] ?? '0') === '1';
+$pumpRequested = $pumpMode === 'manual' && ($settings['pump_manual_state'] ?? '0') === '1';
+$actuatorReportedAt = (int)($settings['actuator_state_reported_at'] ?? 0);
+$actuatorFeedbackAge = $actuatorReportedAt > 0 ? max(0, time() - $actuatorReportedAt) : null;
+$actuatorFeedbackFresh = $actuatorFeedbackAge !== null && $actuatorFeedbackAge <= 15;
 
 // ── Chart history ───────────────────────────────────────────
 $tempDeviceId = $pdo->query(
@@ -122,6 +129,12 @@ echo json_encode([
     'humidity'       => $humidity,
     'fanState'       => $fanState,
     'pumpState'      => $pumpState,
+    'fanMode'        => $fanMode,
+    'pumpMode'       => $pumpMode,
+    'fanRequested'   => $fanRequested,
+    'pumpRequested'  => $pumpRequested,
+    'actuatorFeedbackFresh' => $actuatorFeedbackFresh,
+    'actuatorFeedbackAge' => $actuatorFeedbackAge,
     'tempUnit'       => $TEMP_UNIT,
     'tempAbove'      => $temperature > $MAX_TEMP,
     'tempBelow'      => $temperature < $MIN_TEMP,

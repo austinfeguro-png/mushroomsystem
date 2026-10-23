@@ -3,11 +3,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-// Keep identical to firmware/biosync_uno/protocol.h (checked by tests).
+// Keep the Uno and ESP protocol parsers in sync.
 namespace BioSync {
 struct Reading { float temperature, humidity; };
+struct OutputState { bool fan, pump; };
 struct Command {
   bool fan, pump;
+  bool fanManual, pumpManual;
   float minTemp, maxTemp, minHum, maxHum;
 };
 
@@ -49,16 +51,35 @@ inline bool parseReading(const char *p, Reading &result) {
   return true;
 }
 
+inline bool parseOutputState(const char *p, OutputState &result) {
+  OutputState state;
+  if (!literal(p, "STATE:FAN=") || (*p != '0' && *p != '1')) return false;
+  state.fan = *p++ == '1';
+  if (!literal(p, ",PUMP=") || (*p != '0' && *p != '1')) return false;
+  state.pump = *p++ == '1';
+  if (*p != '\0') return false;
+  result = state;
+  return true;
+}
+
 inline bool binary(const char *&p, bool &value) {
   if (*p != '0' && *p != '1') return false;
   value = *p++ == '1';
   return true;
 }
 
+inline bool mode(const char *&p, bool &manual) {
+  if (strncmp(p, "MANUAL", 6) == 0) { p += 6; manual = true; return true; }
+  if (strncmp(p, "AUTO", 4) == 0) { p += 4; manual = false; return true; }
+  return false;
+}
+
 inline bool parseCommand(const char *p, Command &result) {
   Command c;
   if (!literal(p, "CMD:FAN=") || !binary(p, c.fan)
       || !literal(p, ",PUMP=") || !binary(p, c.pump)
+      || !literal(p, ",FAN_MODE=") || !mode(p, c.fanManual)
+      || !literal(p, ",PUMP_MODE=") || !mode(p, c.pumpManual)
       || !literal(p, ",MIN_TEMP=") || !number(p, c.minTemp)
       || !literal(p, ",MAX_TEMP=") || !number(p, c.maxTemp)
       || !literal(p, ",MIN_HUM=") || !number(p, c.minHum)

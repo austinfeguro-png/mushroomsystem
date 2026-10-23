@@ -19,6 +19,24 @@ use a 10k pull-up from DATA to VCC; pin 3 is unused. Verify whether a module
 already has its pull-up. LEDs return to Uno ground. These sketches assume
 active-LOW relay inputs; verify the actual module before connecting loads.
 
+## Initial full-system test with indicator LEDs
+
+Use both boards, the 3-pin DHT22, breadboard, and the existing firmware pin
+map. Connect the DHT22 VCC to Uno 5V, DATA to Uno D2, and GND to Uno GND;
+follow the module's printed labels because pin order varies. Connect Uno D10
+(RX) to NodeMCU D7 (TX). Connect Uno D11 (TX) to NodeMCU D6 (RX) through a
+divider: D11 → 1k ohm → junction → D6, with 2k ohm from the junction to GND.
+Power the Uno and NodeMCU from separate USB ports and connect their GND pins;
+do not connect Uno 5V to NodeMCU VIN.
+
+For the first output check, connect one LED and its own 220–330 ohm resistor
+from Uno D8 to GND (fan state), and a second LED/resistor from Uno D9 to GND
+(pump state). The LED anode faces the GPIO/resistor and the cathode returns to
+GND. Leave the 12V relay coil and loads disconnected during this check. The
+firmware's D4/D5 relay outputs require a compatible relay driver module; a
+bare 12V relay coil must not connect directly to an Uno pin. See
+[the complete initial-test wiring diagram](wiring_nodemcu_breadboard_test.svg).
+
 ## Power and serial voltage
 
 Use the Uno TX divider: D11 → 1k ohm → junction → NodeMCU D6; junction →
@@ -38,14 +56,14 @@ Test relay polarity with the loads disconnected first.
 
 ## Upload
 
-1. Open `firmware/biosync_uno/biosync_uno.ino`. Select **Arduino Uno** and its
+1. Open `firmware/uno/uno.ino`. Select **Arduino Uno** and its
    USB port. Install the Adafruit **DHT sensor library** and **Adafruit Unified
    Sensor** dependency if needed. Upload.
-2. Open `sketch_may16a/sketch_may16a.ino`. Select **NodeMCU 1.0 (ESP-12E Module)**
+2. Open `firmware/esp12e/esp12e.ino`. Select **NodeMCU 1.0 (ESP-12E Module)**
    and its separate USB port. Install the ESP8266 board package if needed.
 3. Set the NodeMCU's `SERVER_URL` to the laptop's current Wi-Fi IPv4 address.
    Current default: `http://192.168.43.178/mushroomsystem/api_update.php`.
-4. Copy `sketch_may16a/secrets.h.example` to `secrets.h` only if it does not
+4. Copy `firmware/esp12e/secrets.h.example` to `secrets.h` only if it does not
    already exist. Preserve the existing private file. Enter Wi-Fi credentials
    and a nonempty `BIOSYNC_DEVICE_TOKEN` matching Apache's environment variable
    of the same name. Restart Apache after changing its environment. The file is
@@ -113,18 +131,28 @@ boards USB-powered with the 5V-to-VIN jumper removed during this test.
   its own outputs. Invalid/non-finite readings, out-of-range pairs, and `0/0`
   turn both relays off. No arbitrary universal rate-of-change limit is imposed.
 - NodeMCU syncs fresh readings every five seconds using authenticated form POST:
-  `temp`, `hum`, `log`, and `X-Device-Token`. It requests a database log on the
+  `temp`, `hum`, `log`, and `X-Device-Token`. It includes `fan_actual` and
+  `pump_actual` only when it has recent Uno output feedback. It requests a database log on the
   first successful request and every ten minutes thereafter, not on every sync.
   PHP/Apache and MariaDB must be running. HTTP 403 indicates token configuration.
-- Only a complete valid HTTP 200 `CMD:FAN=...,PUMP=...,MIN_TEMP=...,MAX_TEMP=...,
-  MIN_HUM=...,MAX_HUM=...` response is forwarded to the Uno. The parser validates
+  An Uno `ERR:` frame immediately invalidates the cached reading so stale sensor
+  values are not posted after a reported fault.
+- Only a complete valid HTTP 200 `CMD:FAN=...,PUMP=...,FAN_MODE=AUTO|MANUAL,
+  PUMP_MODE=AUTO|MANUAL,MIN_TEMP=...,MAX_TEMP=...,MIN_HUM=...,MAX_HUM=...`
+  response is forwarded to the Uno. The parser validates
   binary states, finite numeric values, ranges, ordering, and exact field order.
   Overlong serial frames and HTTP bodies are rejected rather than truncated.
 - At startup, or after 30 seconds without a valid command, both relays are off.
   There is no indefinite offline automatic actuation. A valid fresh server
-  command re-enables automatic overrides using its stage thresholds. High
-  temperature/humidity requests the fan; low humidity requests the pump; high
-  humidity forces the pump off. Manual server commands remain subject to safety.
+  command re-enables control. AUTO mode follows stage thresholds; MANUAL mode
+  follows the dashboard request. High humidity still forces the pump off, and
+  manual pump requests still obey the runtime limit and cooldown. The Uno sends
+  `STATE:FAN=n,PUMP=n` feedback after applying its safety rules; the dashboard
+  displays these reported output-pin states, not just the requested states.
+  Missing feedback does not get guessed from the thresholds; the dashboard marks
+  the state as stale after 15 seconds. If the sensor reading expires, the bridge
+  sends state-only feedback so a safe OFF state still reaches the dashboard
+  without writing stale sensor data.
 - Pump continuous runtime is limited to 30 seconds, followed by a 60-second
   cooldown after **every** stop. Reboot clears these in-memory timers. Network
   HTTP waits run only on the NodeMCU, so they cannot block Uno pump enforcement.

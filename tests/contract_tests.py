@@ -57,9 +57,9 @@ notif = read("notificationspage.php")
 prof  = read("profile.php")
 umgmt = read("usermanagement.php")
 login = read("login.php")
-sketch= read(os.path.join("sketch_may16a", "sketch_may16a.ino"))
-uno = read("firmware/biosync_uno/biosync_uno.ino")
-protocol = read("sketch_may16a/protocol.h")
+sketch= read("firmware/esp12e/esp12e.ino")
+uno = read("firmware/uno/uno.ino")
+protocol = read("firmware/esp12e/protocol.h")
 
 # -------------------------------------------------------------
 print("=== 1. Dashboard JS live-update contract vs live_data.php ===")
@@ -122,7 +122,7 @@ check("ml_widget retains algorithm and stage details in its header",
 print("=== 5. api_update.php <-> Arduino sketch contract ===")
 check("api_update echoes CMD:FAN=,PUMP=", "CMD:FAN={$fanState},PUMP={$pumpState}" in api)
 check("Uno and NodeMCU share the exact command and reading protocol",
-      protocol == read("firmware/biosync_uno/protocol.h")
+      protocol == read("firmware/uno/protocol.h")
       and '"CMD:FAN="' in protocol and '",PUMP="' in protocol
       and 'BioSync::parseCommand' in uno and 'BioSync::parseCommand' in sketch
       and 'BioSync::parseReading' in sketch)
@@ -188,8 +188,8 @@ check("NodeMCU yields after bounded serial processing and rate-limits invalid fr
       and "yield();" in sketch.split("void readUno()", 1)[1].split("bool freshReading()", 1)[0]
       and "millis() - lastFrameWarning >= 5000UL" in sketch)
 
-guard = read("sketch_may16a/rx_guard.cpp")
-guard_config = read("sketch_may16a/rx_guard.h")
+guard = read("firmware/esp12e/rx_guard.cpp")
+guard_config = read("firmware/esp12e/rx_guard.h")
 check("D6 interrupt budget allows normal 9600-baud traffic with margin",
       int(re.search(r"EDGE_LIMIT = (\d+)", guard_config).group(1))
       > 9600 * int(re.search(r"WINDOW_US = (\d+)", guard_config).group(1)) / 1000000 + 1)

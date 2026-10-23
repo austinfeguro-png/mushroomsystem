@@ -63,9 +63,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax_action'])) {
             echo json_encode(['success' => false, 'error' => 'Invalid state']);
             exit();
         }
-        $stmt = $pdo->prepare("UPDATE devices SET current_state = :state WHERE device_name = :name");
-        $stmt->execute(['state' => $newState, 'name' => $deviceName]);
-        echo json_encode(['success' => true, 'device' => $deviceName, 'state' => $newState]);
+        $prefix = $deviceName === 'Ventilation Fan' ? 'fan' : 'pump';
+        $stmt = $pdo->prepare("INSERT INTO system_settings (setting_key, setting_value)
+            VALUES (:key, :val) ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)");
+        $stmt->execute(['key' => $prefix . '_control_mode', 'val' => 'manual']);
+        $stmt->execute(['key' => $prefix . '_manual_state', 'val' => (string)$newState]);
+        echo json_encode(['success' => true, 'device' => $deviceName, 'state' => $newState, 'mode' => 'manual']);
+        exit();
+    }
+
+    if ($_POST['ajax_action'] === 'set_device_auto') {
+        $deviceName = trim($_POST['device_name'] ?? '');
+        if (!in_array($deviceName, ['Ventilation Fan', 'Water Pump'], true)) {
+            echo json_encode(['success' => false, 'error' => 'Unknown device']);
+            exit();
+        }
+        $prefix = $deviceName === 'Ventilation Fan' ? 'fan' : 'pump';
+        $stmt = $pdo->prepare("INSERT INTO system_settings (setting_key, setting_value)
+            VALUES (:key, 'auto') ON DUPLICATE KEY UPDATE setting_value = 'auto'");
+        $stmt->execute(['key' => $prefix . '_control_mode']);
+        echo json_encode(['success' => true, 'device' => $deviceName, 'mode' => 'auto']);
         exit();
     }
 
@@ -219,6 +236,9 @@ $humidity = (float)$humStmt->fetchColumn();
 
 $fanState  = isset($devices['Ventilation Fan']) && $devices['Ventilation Fan'] == '1';
 $pumpState = isset($devices['Water Pump'])      && $devices['Water Pump']      == '1';
+$actuatorReportedAt = (int)($settings['actuator_state_reported_at'] ?? 0);
+$actuatorFeedbackAge = $actuatorReportedAt > 0 ? max(0, time() - $actuatorReportedAt) : null;
+$actuatorFeedbackFresh = $actuatorFeedbackAge !== null && $actuatorFeedbackAge <= 15;
 
 // Historical chart data
 $days = []; $tempHistory = []; $humHistory = [];
@@ -690,6 +710,7 @@ if ($alertTriggered) {
         }
         .led.on  { background: var(--primary); box-shadow: 0 0 6px var(--primary); }
         .led.off { background: var(--text-light); }
+        .led.stale { background: var(--text-light); opacity: .55; }
 
         .state-label {
             font-size: 15px;
@@ -698,6 +719,7 @@ if ($alertTriggered) {
         }
         .state-label.on  { color: var(--primary); }
         .state-label.off { color: var(--text-light); }
+        .state-label.stale { color: var(--text-muted); }
 
         .auto-badge {
             margin-top: 8px;
@@ -719,15 +741,24 @@ if ($alertTriggered) {
 
         .toggle {
             position: relative;
-            width: 44px; height: 24px;
+            width: 48px; height: 44px;
             flex-shrink: 0;
         }
 
-        .toggle input { display: none; }
+        .toggle input {
+            position: absolute;
+            inset: 0;
+            width: 100%; height: 100%;
+            margin: 0;
+            opacity: 0;
+            cursor: pointer;
+            z-index: 1;
+        }
 
         .toggle-track {
             position: absolute;
-            inset: 0;
+            top: 10px; left: 2px;
+            width: 44px; height: 24px;
             background: var(--text-light);
             border-radius: 24px;
             cursor: pointer;
@@ -747,6 +778,7 @@ if ($alertTriggered) {
 
         .toggle input:checked + .toggle-track { background: var(--primary); }
         .toggle input:checked + .toggle-track::before { transform: translateX(20px); }
+        .toggle input:focus-visible + .toggle-track { outline: 2px solid var(--primary); outline-offset: 3px; }
 
         /* =====================================================
            CHARTS
@@ -1014,6 +1046,32 @@ if ($alertTriggered) {
         ===================================================== */
         .device-card { transition: box-shadow var(--transition); }
         .device-card.toggling { pointer-events: none; opacity: 0.75; }
+        .device-control-row {
+            display: flex; align-items: center; flex-wrap: wrap; gap: 10px;
+            margin-top: 16px; padding-top: 12px;
+            border-top: 1px solid var(--border);
+        }
+        .auto-mode-button {
+            display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+            min-height: 44px; padding: 0 12px;
+            border: 1px solid var(--border); border-radius: 999px;
+            background: var(--bg-card); color: var(--text-muted);
+            font: inherit; font-size: 12px; font-weight: 700;
+            cursor: pointer; transition: color var(--transition), background var(--transition), border-color var(--transition);
+        }
+        .auto-mode-button[hidden] { display: none; }
+        .auto-mode-button.is-available { color: var(--primary); border-color: var(--primary); }
+        .auto-mode-button.is-available:hover { background: var(--primary-light); }
+        .auto-mode-button:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+        .auto-mode-button:disabled { cursor: default; opacity: .72; }
+        .device-mode-pill {
+            display: inline-flex; align-items: center; justify-content: center;
+            min-height: 32px; padding: 0 10px;
+            border: 1px solid var(--border); border-radius: 999px;
+            background: var(--bg-body); color: var(--text-muted);
+            font-size: 11px; font-weight: 700; letter-spacing: .04em;
+        }
+        .device-mode-pill.manual { color: var(--primary); border-color: var(--primary); background: var(--primary-light); }
 
         .device-feedback {
             margin-top: 10px;
@@ -1231,9 +1289,9 @@ if ($alertTriggered) {
                         <div>
                             <div class="stat-label">Ventilation Fan</div>
                             <div class="device-state">
-                                <div class="led <?php echo $fanState ? 'on' : 'off'; ?>" id="fanLed"></div>
-                                <div class="state-label <?php echo $fanState ? 'on' : 'off'; ?>" id="fanLabel">
-                                    <?php echo $fanState ? 'Running' : 'Offline'; ?>
+                                <div class="led <?php echo $actuatorFeedbackFresh ? ($fanState ? 'on' : 'off') : 'stale'; ?>" id="fanLed"></div>
+                                <div class="state-label <?php echo $actuatorFeedbackFresh ? ($fanState ? 'on' : 'off') : 'stale'; ?>" id="fanLabel" aria-live="polite">
+                                    <?php echo $actuatorFeedbackFresh ? ($fanState ? 'Running' : 'Standby') : 'No feedback'; ?>
                                 </div>
                                 <span class="device-spinner" id="fanSpinner" style="display:none;">
                                     <i class="fa-solid fa-circle-notch fa-spin" style="font-size:13px;color:var(--text-muted);"></i>
@@ -1243,10 +1301,19 @@ if ($alertTriggered) {
                         </div>
                         <div class="toggle-wrap" style="margin-top:4px;">
                             <label class="toggle">
-                                <input type="checkbox" id="fanToggle" <?php echo $fanState ? 'checked' : ''; ?>>
+                                <input type="checkbox" id="fanToggle" aria-label="Manual fan control" <?php echo (($settings['fan_control_mode'] ?? 'auto') === 'manual' ? ($settings['fan_manual_state'] ?? '0') === '1' : $fanState) ? 'checked' : ''; ?>>
                                 <div class="toggle-track"></div>
                             </label>
                         </div>
+                    </div>
+                    <div class="device-control-row">
+                        <button type="button"
+                                class="auto-mode-button<?php echo (($settings['fan_control_mode'] ?? 'auto') === 'manual') ? ' is-available' : ''; ?>"
+                                id="fanAuto" onclick="setDeviceAuto('Ventilation Fan')"
+                                <?php echo (($settings['fan_control_mode'] ?? 'auto') === 'auto') ? 'hidden' : ''; ?>>
+                            <i class="fa-solid fa-rotate-right" aria-hidden="true"></i><span>Use Auto</span>
+                        </button>
+                        <span class="device-mode-pill<?php echo (($settings['fan_control_mode'] ?? 'auto') === 'manual') ? ' manual' : ''; ?>" id="fanMode" aria-live="polite"><?php echo (($settings['fan_control_mode'] ?? 'auto') === 'manual') ? 'MANUAL' : 'AUTO'; ?></span>
                     </div>
                     <div class="device-feedback" id="fanFeedback"></div>
                 </div>
@@ -1257,9 +1324,9 @@ if ($alertTriggered) {
                         <div>
                             <div class="stat-label">Water Pump</div>
                             <div class="device-state">
-                                <div class="led <?php echo $pumpState ? 'on' : 'off'; ?>" id="pumpLed"></div>
-                                <div class="state-label <?php echo $pumpState ? 'on' : 'off'; ?>" id="pumpLabel">
-                                    <?php echo $pumpState ? 'Active' : 'Standby'; ?>
+                                <div class="led <?php echo $actuatorFeedbackFresh ? ($pumpState ? 'on' : 'off') : 'stale'; ?>" id="pumpLed"></div>
+                                <div class="state-label <?php echo $actuatorFeedbackFresh ? ($pumpState ? 'on' : 'off') : 'stale'; ?>" id="pumpLabel" aria-live="polite">
+                                    <?php echo $actuatorFeedbackFresh ? ($pumpState ? 'Running' : 'Standby') : 'No feedback'; ?>
                                 </div>
                                 <span class="device-spinner" id="pumpSpinner" style="display:none;">
                                     <i class="fa-solid fa-circle-notch fa-spin" style="font-size:13px;color:var(--text-muted);"></i>
@@ -1269,10 +1336,19 @@ if ($alertTriggered) {
                         </div>
                         <div class="toggle-wrap" style="margin-top:4px;">
                             <label class="toggle">
-                                <input type="checkbox" id="pumpToggle" <?php echo $pumpState ? 'checked' : ''; ?>>
+                                <input type="checkbox" id="pumpToggle" aria-label="Manual pump control" <?php echo (($settings['pump_control_mode'] ?? 'auto') === 'manual' ? ($settings['pump_manual_state'] ?? '0') === '1' : $pumpState) ? 'checked' : ''; ?>>
                                 <div class="toggle-track"></div>
                             </label>
                         </div>
+                    </div>
+                    <div class="device-control-row">
+                        <button type="button"
+                                class="auto-mode-button<?php echo (($settings['pump_control_mode'] ?? 'auto') === 'manual') ? ' is-available' : ''; ?>"
+                                id="pumpAuto" onclick="setDeviceAuto('Water Pump')"
+                                <?php echo (($settings['pump_control_mode'] ?? 'auto') === 'auto') ? 'hidden' : ''; ?>>
+                            <i class="fa-solid fa-rotate-right" aria-hidden="true"></i><span>Use Auto</span>
+                        </button>
+                        <span class="device-mode-pill<?php echo (($settings['pump_control_mode'] ?? 'auto') === 'manual') ? ' manual' : ''; ?>" id="pumpMode" aria-live="polite"><?php echo (($settings['pump_control_mode'] ?? 'auto') === 'manual') ? 'MANUAL' : 'AUTO'; ?></span>
                     </div>
                     <div class="device-feedback" id="pumpFeedback"></div>
                 </div>
@@ -1582,6 +1658,8 @@ themeBtn.addEventListener('click', () => applyTheme(!document.body.classList.con
 // ================================================
 let pendingToggle   = false;   // blocks auto-refresh during device toggles
 let pendingSettings = false;   // blocks auto-refresh during settings save
+let deviceControlVersion = 0;
+let liveDataSequence = 0;
 
 function showFeedback(feedbackId, message, type) {
     const el = document.getElementById(feedbackId);
@@ -1593,6 +1671,7 @@ function showFeedback(feedbackId, message, type) {
 
 function toggleDevice(checkboxEl, deviceName, state, labelId, ledId, spinnerId, cardId, feedbackId, onText, offText) {
     pendingToggle = true;
+    deviceControlVersion++;
 
     // Disable card while request is in flight
     const card = document.getElementById(cardId);
@@ -1613,18 +1692,11 @@ function toggleDevice(checkboxEl, deviceName, state, labelId, ledId, spinnerId, 
         .then(data => {
             if (!data.success) throw new Error('Server rejected toggle');
 
-            const on    = state === '1';
-            const label = document.getElementById(labelId);
-            const led   = document.getElementById(ledId);
-
-            // Update label text and class
-            label.textContent = on ? onText : offText;
-            label.className   = 'state-label ' + (on ? 'on' : 'off');
-
-            // Update LED
-            led.className = 'led ' + (on ? 'on' : 'off');
-
-            showFeedback(feedbackId, (on ? onText : offText) + ' — command sent', 'success');
+            showFeedback(feedbackId, 'Manual request saved; waiting for hardware status.', 'success');
+            const mode = document.getElementById(deviceName === 'Ventilation Fan' ? 'fanMode' : 'pumpMode');
+            if (mode) { mode.textContent = 'MANUAL'; mode.classList.add('manual'); }
+            const autoButton = document.getElementById(deviceName === 'Ventilation Fan' ? 'fanAuto' : 'pumpAuto');
+            if (autoButton) { autoButton.hidden = false; autoButton.disabled = false; autoButton.classList.add('is-available'); }
         })
         .catch(e => {
             console.error('Toggle error:', e);
@@ -1635,8 +1707,42 @@ function toggleDevice(checkboxEl, deviceName, state, labelId, ledId, spinnerId, 
         .finally(() => {
             if (spinner) spinner.style.display = 'none';
             if (card)    card.classList.remove('toggling');
-            // Allow auto-refresh again after a short delay
-            setTimeout(() => { pendingToggle = false; }, 1500);
+            // Refresh the requested mode and reported hardware state immediately,
+            // then once more after the bridge has had time to apply the command.
+            pendingToggle = false;
+            updateLiveData();
+            setTimeout(updateLiveData, 1500);
+        });
+}
+
+function setDeviceAuto(deviceName) {
+    pendingToggle = true;
+    deviceControlVersion++;
+    const prefix = deviceName === 'Ventilation Fan' ? 'fan' : 'pump';
+    const autoButton = document.getElementById(prefix + 'Auto');
+    if (autoButton) autoButton.disabled = true;
+    const fd = new FormData();
+    fd.append('csrf_token', document.querySelector('meta[name="csrf-token"]').content);
+    fd.append('ajax_action', 'set_device_auto');
+    fd.append('device_name', deviceName);
+    fetch('dashboard.php', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => {
+            if (!data.success) throw new Error('Server rejected automatic mode');
+            const mode = document.getElementById(prefix + 'Mode');
+            if (mode) { mode.textContent = 'AUTO'; mode.classList.remove('manual'); }
+            if (autoButton) autoButton.hidden = true;
+            if (autoButton) autoButton.classList.remove('is-available');
+            showFeedback(prefix + 'Feedback', 'Automatic threshold control restored.', 'success');
+        })
+        .catch(() => {
+            if (autoButton) { autoButton.hidden = false; autoButton.disabled = false; }
+            showFeedback(prefix + 'Feedback', 'Failed — check connection', 'error');
+        })
+        .finally(() => {
+            pendingToggle = false;
+            updateLiveData();
+            setTimeout(updateLiveData, 1500);
         });
 }
 
@@ -1873,10 +1979,13 @@ function confirmAdvance() {
 function updateLiveData() {
     const modalOpen = document.getElementById('settingsModal').classList.contains('open');
     if (modalOpen || pendingToggle || pendingSettings) return;
+    const sequence = ++liveDataSequence;
+    const controlVersion = deviceControlVersion;
 
     fetch('live_data.php')
         .then(r => r.json())
         .then(d => {
+            if (sequence !== liveDataSequence) return;
 
             // ── Stat cards ────────────────────────────────
             const statCards = document.querySelectorAll('.stat-value');
@@ -1892,17 +2001,51 @@ function updateLiveData() {
             // ── Fan ───────────────────────────────────────
             const fanLed   = document.getElementById('fanLed');
             const fanLabel = document.getElementById('fanLabel');
-            if (!pendingToggle) {
-                if (fanLed)   fanLed.className    = 'led ' + (d.fanState ? 'on' : 'off');
-                if (fanLabel) { fanLabel.className = 'state-label ' + (d.fanState ? 'on' : 'off'); fanLabel.textContent = d.fanState ? 'Running' : 'Offline'; }
+            const fanToggle = document.getElementById('fanToggle');
+            const fanMode = document.getElementById('fanMode');
+            const fanAuto = document.getElementById('fanAuto');
+            if (!pendingToggle && controlVersion === deviceControlVersion) {
+                const fanFresh = d.actuatorFeedbackFresh === true;
+                if (fanLed) fanLed.className = 'led ' + (fanFresh ? (d.fanState ? 'on' : 'off') : 'stale');
+                if (fanLabel) {
+                    fanLabel.className = 'state-label ' + (fanFresh ? (d.fanState ? 'on' : 'off') : 'stale');
+                    fanLabel.textContent = fanFresh ? (d.fanState ? 'Running' : 'Standby') : 'No feedback';
+                }
+                if (fanToggle) fanToggle.checked = d.fanMode === 'manual' ? d.fanRequested : d.fanState;
+                if (fanMode) {
+                    fanMode.textContent = d.fanMode === 'manual' ? 'MANUAL' : 'AUTO';
+                    fanMode.classList.toggle('manual', d.fanMode === 'manual');
+                }
+                if (fanAuto) {
+                    fanAuto.hidden = d.fanMode !== 'manual';
+                    fanAuto.disabled = false;
+                    fanAuto.classList.toggle('is-available', d.fanMode === 'manual');
+                }
             }
 
             // ── Pump ──────────────────────────────────────
             const pumpLed   = document.getElementById('pumpLed');
             const pumpLabel = document.getElementById('pumpLabel');
-            if (!pendingToggle) {
-                if (pumpLed)   pumpLed.className    = 'led ' + (d.pumpState ? 'on' : 'off');
-                if (pumpLabel) { pumpLabel.className = 'state-label ' + (d.pumpState ? 'on' : 'off'); pumpLabel.textContent = d.pumpState ? 'Active' : 'Standby'; }
+            const pumpToggle = document.getElementById('pumpToggle');
+            const pumpMode = document.getElementById('pumpMode');
+            const pumpAuto = document.getElementById('pumpAuto');
+            if (!pendingToggle && controlVersion === deviceControlVersion) {
+                const pumpFresh = d.actuatorFeedbackFresh === true;
+                if (pumpLed) pumpLed.className = 'led ' + (pumpFresh ? (d.pumpState ? 'on' : 'off') : 'stale');
+                if (pumpLabel) {
+                    pumpLabel.className = 'state-label ' + (pumpFresh ? (d.pumpState ? 'on' : 'off') : 'stale');
+                    pumpLabel.textContent = pumpFresh ? (d.pumpState ? 'Running' : 'Standby') : 'No feedback';
+                }
+                if (pumpToggle) pumpToggle.checked = d.pumpMode === 'manual' ? d.pumpRequested : d.pumpState;
+                if (pumpMode) {
+                    pumpMode.textContent = d.pumpMode === 'manual' ? 'MANUAL' : 'AUTO';
+                    pumpMode.classList.toggle('manual', d.pumpMode === 'manual');
+                }
+                if (pumpAuto) {
+                    pumpAuto.hidden = d.pumpMode !== 'manual';
+                    pumpAuto.disabled = false;
+                    pumpAuto.classList.toggle('is-available', d.pumpMode === 'manual');
+                }
             }
 
             // ── Alert banner ──────────────────────────────

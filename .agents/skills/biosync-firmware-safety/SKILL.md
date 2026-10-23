@@ -5,7 +5,7 @@ description: Review or change Bio-Sync Arduino/ESP8266 sensor validation, device
 
 # Bio-Sync firmware safety
 
-Use for edits to `sketch_may16a/` or hardware-facing rules. Consult the [project map](../biosync-workflow/references/project-map.md) for pin assignments and the PHP device contract.
+Use for edits to `firmware/uno/`, `firmware/esp12e/`, or hardware-facing rules. Consult the [project map](../biosync-workflow/references/project-map.md) for pin assignments and the PHP device contract.
 
 - On a failed/stale sensor read or invalid paired reading, choose a documented safe output state, stop unsafe actuation, and raise the alert output. Confirm relay polarity from the actual module before assuming `LOW` means off.
 - Reject non-finite, impossible, or clearly stale readings. Treat simultaneous `0/0` and implausible jumps as suspect using sensor capability and sample interval; don’t invent universal delta limits without evidence.

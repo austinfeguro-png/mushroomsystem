@@ -28,6 +28,46 @@ if ($deviceToken === '' || !hash_equals($deviceToken, (string)$providedToken)) {
 require_once 'config.php';
 $pdo = getDB();
 
+function persistActuatorFeedback(PDO $pdo, int $fanState, int $pumpState): void {
+    $pdo->beginTransaction();
+    try {
+        $stmt = $pdo->prepare("UPDATE devices SET current_state = :val WHERE device_name = :name");
+        $stmt->execute(['val' => $fanState, 'name' => 'Ventilation Fan']);
+        $stmt->execute(['val' => $pumpState, 'name' => 'Water Pump']);
+        $pdo->prepare("INSERT INTO system_settings (setting_key, setting_value)
+            VALUES ('actuator_state_reported_at', :reported_at)
+            ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)")
+            ->execute(['reported_at' => (string)time()]);
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        throw $e;
+    }
+}
+
+// A sensor fault can still leave the Uno with a known safe output state.
+// Accept that actuator feedback without refreshing sensor values or logs.
+if (isset($_POST['state_only']) && (string)$_POST['state_only'] === '1') {
+    $fanActual = $_POST['fan_actual'] ?? null;
+    $pumpActual = $_POST['pump_actual'] ?? null;
+    if (!is_scalar($fanActual) || !in_array((string)$fanActual, ['0', '1'], true)
+        || !is_scalar($pumpActual) || !in_array((string)$pumpActual, ['0', '1'], true)) {
+        http_response_code(400);
+        echo "Invalid output state";
+        exit;
+    }
+    try {
+        persistActuatorFeedback($pdo, (int)$fanActual, (int)$pumpActual);
+    } catch (Throwable $e) {
+        error_log("BioSync actuator feedback error: " . $e->getMessage());
+        http_response_code(500);
+        echo "Could not save output state";
+        exit;
+    }
+    echo "STATE:OK";
+    exit;
+}
+
 // ----------------------------------------------------------
 // 1. READ & VALIDATE SENSOR DATA
 // ----------------------------------------------------------
@@ -113,23 +153,31 @@ try {
 }
 
 // ----------------------------------------------------------
-// 5. THRESHOLD CHECK → UPDATE FAN & PUMP STATES
+// 5. BUILD COMMAND FROM AUTO THRESHOLDS OR SAVED MANUAL REQUESTS
 // ----------------------------------------------------------
-$fanState  = ($temperature > $MAX_TEMP || $humidity > $MAX_HUM) ? 1 : 0;
-$pumpState = $humidity < $MIN_HUM ? 1 : 0;
+$fanAuto  = ($temperature > $MAX_TEMP || $humidity > $MAX_HUM) ? 1 : 0;
+$pumpAuto = $humidity < $MIN_HUM ? 1 : 0;
+$fanMode  = ($settings['fan_control_mode'] ?? 'auto') === 'manual' ? 'manual' : 'auto';
+$pumpMode = ($settings['pump_control_mode'] ?? 'auto') === 'manual' ? 'manual' : 'auto';
+$fanState = $fanMode === 'manual'
+    ? ((($settings['fan_manual_state'] ?? '0') === '1') ? 1 : 0)
+    : $fanAuto;
+$pumpState = $pumpMode === 'manual'
+    ? ((($settings['pump_manual_state'] ?? '0') === '1') ? 1 : 0)
+    : $pumpAuto;
 
-try {
-    $pdo->prepare("
-        UPDATE devices SET current_state = :val
-        WHERE device_name = 'Ventilation Fan'
-    ")->execute(['val' => $fanState]);
-
-    $pdo->prepare("
-        UPDATE devices SET current_state = :val
-        WHERE device_name = 'Water Pump'
-    ")->execute(['val' => $pumpState]);
-} catch (PDOException $e) {
-    error_log("BioSync actuator update error: " . $e->getMessage());
+// The ESP reports the Uno's applied output-pin states. Do not infer hardware
+// state from thresholds when feedback is absent or malformed.
+$fanActualRaw = $_POST['fan_actual'] ?? null;
+$pumpActualRaw = $_POST['pump_actual'] ?? null;
+$hasActualStates = is_scalar($fanActualRaw) && in_array((string)$fanActualRaw, ['0', '1'], true)
+    && is_scalar($pumpActualRaw) && in_array((string)$pumpActualRaw, ['0', '1'], true);
+if ($hasActualStates) {
+    try {
+        persistActuatorFeedback($pdo, (int)$fanActualRaw, (int)$pumpActualRaw);
+    } catch (Throwable $e) {
+        error_log("BioSync actuator feedback error: " . $e->getMessage());
+    }
 }
 
 // ----------------------------------------------------------
@@ -264,4 +312,6 @@ try {
 // ----------------------------------------------------------
 // 8. RESPOND TO ESP8266 / BROWSER
 // ----------------------------------------------------------
-echo "CMD:FAN={$fanState},PUMP={$pumpState},MIN_TEMP={$MIN_TEMP},MAX_TEMP={$MAX_TEMP},MIN_HUM={$MIN_HUM},MAX_HUM={$MAX_HUM}";
+echo "CMD:FAN={$fanState},PUMP={$pumpState},FAN_MODE=" . strtoupper($fanMode)
+    . ",PUMP_MODE=" . strtoupper($pumpMode)
+    . ",MIN_TEMP={$MIN_TEMP},MAX_TEMP={$MAX_TEMP},MIN_HUM={$MIN_HUM},MAX_HUM={$MAX_HUM}";

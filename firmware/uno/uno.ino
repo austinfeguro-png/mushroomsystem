@@ -18,7 +18,7 @@ const unsigned long COMMAND_TIMEOUT = 30000UL;
 const unsigned long PUMP_MAX_RUN_MS = 30000UL;
 const unsigned long PUMP_COOLDOWN_MS = 60000UL;
 BioSync::Reading reading = {0, 0};
-BioSync::Command command = {false, false, 24, 28, 70, 85};
+BioSync::Command command = {false, false, false, false, 24, 28, 70, 85};
 BioSync::LineBuffer incoming;
 bool sensorValid = false, commandValid = false;
 bool fanOn = false, pumpOn = false, pumpCooling = false;
@@ -34,9 +34,9 @@ void applyOutputs(unsigned long now) {
            && commandValid && now - lastCommand < COMMAND_TIMEOUT;
   bool wantFan = false, wantPump = false;
   if (safe) {
-    wantFan = command.fan || reading.temperature > command.maxTemp
-                         || reading.humidity > command.maxHum;
-    wantPump = command.pump || reading.humidity < command.minHum;
+    wantFan = command.fanManual ? command.fan
+        : (reading.temperature > command.maxTemp || reading.humidity > command.maxHum);
+    wantPump = command.pumpManual ? command.pump : reading.humidity < command.minHum;
     if (reading.humidity > command.maxHum) wantPump = false;
   }
   if (pumpOn && now - pumpStarted >= PUMP_MAX_RUN_MS) wantPump = false;
@@ -102,6 +102,8 @@ void loop() {
     lastGoodReading = millis();
   }
   applyOutputs(millis());
+  nodeLink.print(F("STATE:FAN=")); nodeLink.print(fanOn ? 1 : 0);
+  nodeLink.print(F(",PUMP=")); nodeLink.println(pumpOn ? 1 : 0);
   if (!sensorValid) {
     nodeLink.println(F("ERR:SENSOR"));
     Serial.println(F("Sensor fault; fan and pump OFF"));

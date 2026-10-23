@@ -1,0 +1,152 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1260" viewBox="0 0 1600 1260" role="img" aria-labelledby="title desc">
+  <title id="title">Bio-Sync physical wiring diagram</title>
+  <desc id="desc">Physical connection schematic for the running Arduino Uno and bare ESP-12E system, with a separate ESP flashing schematic.</desc>
+  <defs>
+    <style>
+      text{font-family:Arial,Helvetica,sans-serif;fill:#182330}.title{font-size:34px;font-weight:700}.subtitle{font-size:17px;fill:#526273}.section{font-size:22px;font-weight:700}.boardTitle{font-size:19px;font-weight:700}.label{font-size:15px}.small{font-size:13px}.tiny{font-size:12px}.bold{font-weight:700}.muted{fill:#526273}.board{stroke:#344454;stroke-width:2.5;rx:18}.uno{fill:#eaf2fb}.esp{fill:#eaf5eb}.module{fill:#f4efff}.relay{fill:#fff0e9}.power{fill:#fff6df}.wire{fill:none;stroke-width:4;stroke-linecap:round;stroke-linejoin:round}.red{stroke:#d94343}.orange{stroke:#e87522}.blue{stroke:#2563c6}.green{stroke:#16805e}.black{stroke:#303943}.terminal{fill:#283747;stroke:#fff;stroke-width:1.5}.panel{fill:#fff;stroke:#ccd5de;stroke-width:2;rx:18}.note{fill:#f5f8fb;stroke:#d4dee7;stroke-width:1.5;rx:12}.divider{fill:#fff3ca;stroke:#9a7417;stroke-width:2}
+    </style>
+  </defs>
+  <rect width="1600" height="1260" fill="#f7f9fb"/>
+  <text x="800" y="52" text-anchor="middle" class="title">BIO-SYNC · UNO + ESP-12E</text>
+  <text x="800" y="82" text-anchor="middle" class="subtitle">Physical wiring · 3-pin DHT22 module · bare ESP-12E</text>
+
+  <rect x="35" y="110" width="1530" height="820" class="panel"/>
+  <text x="70" y="151" class="section">RUNNING SETUP</text>
+  <text x="70" y="178" class="subtitle">Follow the colored wires between the pin terminals. Keep logic grounds common.</text>
+
+  <!-- Wires are drawn first so component bodies sit cleanly over their endpoints. -->
+  <!-- DHT22 to Uno -->
+  <path d="M500 305 V340 H560 V370" class="wire red"/>
+  <path d="M640 305 V350 H700 V370" class="wire blue"/>
+  <path d="M780 305 V360 H840 V370" class="wire black"/>
+  <!-- Relay inputs and power to Uno -->
+  <path d="M335 490 H460" class="wire green"/>
+  <path d="M335 545 H460" class="wire green"/>
+  <path d="M335 605 H460" class="wire red"/>
+  <path d="M335 665 H460" class="wire black"/>
+  <!-- Uno and ESP serial bridge -->
+  <path d="M920 490 H1160" class="wire blue"/>
+  <path d="M920 550 H1000" class="wire blue"/>
+  <rect x="1000" y="538" width="64" height="24" class="divider"/>
+  <path d="M1064 550 H1160" class="wire blue"/>
+  <circle cx="1064" cy="550" r="6" fill="#2563c6"/>
+  <path d="M1064 550 V615" class="wire black"/>
+  <rect x="1049" y="582" width="30" height="18" class="divider"/>
+  <text x="1088" y="597" class="tiny">2kΩ to GND</text>
+  <text x="1032" y="531" text-anchor="middle" class="tiny">1kΩ</text>
+  <!-- Status LEDs -->
+  <path d="M600 730 V780" class="wire green"/>
+  <path d="M760 730 V780" class="wire green"/>
+  <!-- ESP ground to shared ground -->
+  <path d="M920 710 H1160" class="wire black"/>
+  <!-- Regulated ESP power -->
+  <path d="M560 370 H390 V190 H1190 V265" class="wire red"/>
+  <path d="M1300 325 V370" class="wire orange"/>
+
+  <!-- DHT22 module -->
+  <rect x="390" y="205" width="390" height="100" class="board module"/>
+  <text x="585" y="236" text-anchor="middle" class="boardTitle">3-PIN DHT22 MODULE</text>
+  <circle cx="500" cy="305" r="7" class="terminal"/><text x="520" y="286" class="small bold">VCC</text>
+  <circle cx="640" cy="305" r="7" class="terminal"/><text x="660" y="286" class="small bold">DATA / OUT</text>
+  <circle cx="780" cy="305" r="7" class="terminal"/><text x="800" y="286" class="small bold">GND</text>
+
+  <!-- Arduino Uno -->
+  <rect x="460" y="370" width="460" height="360" class="board uno"/>
+  <text x="690" y="405" text-anchor="middle" class="boardTitle">ARDUINO UNO</text>
+  <text x="690" y="428" text-anchor="middle" class="small muted">sensor + relay controller</text>
+  <circle cx="560" cy="370" r="7" class="terminal"/><text x="560" y="458" text-anchor="middle" class="label bold">5V</text>
+  <circle cx="700" cy="370" r="7" class="terminal"/><text x="700" y="458" text-anchor="middle" class="label bold">D2</text>
+  <circle cx="840" cy="370" r="7" class="terminal"/><text x="840" y="458" text-anchor="middle" class="label bold">GND</text>
+  <circle cx="460" cy="490" r="7" class="terminal"/><text x="485" y="496" class="label bold">D4 · FAN</text>
+  <circle cx="460" cy="545" r="7" class="terminal"/><text x="485" y="551" class="label bold">D5 · PUMP</text>
+  <circle cx="460" cy="605" r="7" class="terminal"/><text x="485" y="611" class="label bold">5V</text>
+  <circle cx="460" cy="665" r="7" class="terminal"/><text x="485" y="671" class="label bold">GND</text>
+  <circle cx="920" cy="490" r="7" class="terminal"/><text x="895" y="478" text-anchor="end" class="label bold">D10 RX</text>
+  <circle cx="920" cy="550" r="7" class="terminal"/><text x="895" y="538" text-anchor="end" class="label bold">D11 TX</text>
+  <circle cx="920" cy="710" r="7" class="terminal"/><text x="895" y="704" text-anchor="end" class="small bold">GND</text>
+  <circle cx="600" cy="730" r="7" class="terminal"/><text x="600" y="755" text-anchor="middle" class="small bold">D8</text>
+  <circle cx="760" cy="730" r="7" class="terminal"/><text x="760" y="755" text-anchor="middle" class="small bold">D9</text>
+  <text x="690" y="710" text-anchor="middle" class="small muted">USB serial monitor: 115200 baud · board link: 9600 baud</text>
+
+  <!-- Relay module -->
+  <rect x="70" y="430" width="265" height="290" class="board relay"/>
+  <text x="202" y="465" text-anchor="middle" class="boardTitle">5V RELAY MODULE</text>
+  <circle cx="335" cy="490" r="7" class="terminal"/><text x="315" y="496" text-anchor="end" class="label bold">IN1 fan</text>
+  <circle cx="335" cy="545" r="7" class="terminal"/><text x="315" y="551" text-anchor="end" class="label bold">IN2 pump</text>
+  <circle cx="335" cy="605" r="7" class="terminal"/><text x="315" y="611" text-anchor="end" class="label bold">VCC</text>
+  <circle cx="335" cy="665" r="7" class="terminal"/><text x="315" y="671" text-anchor="end" class="label bold">GND</text>
+  <text x="202" y="700" text-anchor="middle" class="tiny muted">Loads connect at relay COM / NO</text>
+
+  <!-- ESP and boot wiring -->
+  <rect x="1160" y="370" width="330" height="360" class="board esp"/>
+  <text x="1325" y="405" text-anchor="middle" class="boardTitle">BARE ESP-12E</text>
+  <text x="1325" y="428" text-anchor="middle" class="small muted">Use NodeMCU 1.0 board profile</text>
+  <circle cx="1160" cy="490" r="7" class="terminal"/><text x="1185" y="496" class="label bold">GPIO13 TX (D7)</text>
+  <circle cx="1160" cy="550" r="7" class="terminal"/><text x="1185" y="556" class="label bold">GPIO12 RX (D6)</text>
+  <circle cx="1160" cy="710" r="7" class="terminal"/><text x="1185" y="716" class="label bold">GND</text>
+  <circle cx="1300" cy="370" r="7" class="terminal"/><text x="1300" y="460" text-anchor="middle" class="label bold">3V3</text>
+  <text x="1325" y="605" text-anchor="middle" class="small">EN → 3V3 · GPIO15 → GND</text>
+  <text x="1325" y="630" text-anchor="middle" class="small">GPIO0, GPIO2, RST each 10kΩ → 3V3</text>
+  <text x="1325" y="660" text-anchor="middle" class="small">100µF + 0.1µF across 3V3 / GND</text>
+  <text x="1325" y="690" text-anchor="middle" class="tiny muted">Keep ESP ground common with Uno ground</text>
+
+  <!-- 3.3V regulator -->
+  <rect x="1190" y="205" width="260" height="120" class="board power"/>
+  <circle cx="1190" cy="265" r="7" class="terminal"/><text x="1210" y="270" class="small bold">5V IN</text>
+  <text x="1320" y="238" text-anchor="middle" class="label bold">3.3V REGULATOR</text>
+  <text x="1320" y="265" text-anchor="middle" class="small">5V in → 3.3V out</text>
+  <text x="1320" y="290" text-anchor="middle" class="small">AMS1117 or suitable supply</text>
+  <text x="1320" y="313" text-anchor="middle" class="tiny bold">Do not use Uno 3.3V pin</text>
+  <text x="1320" y="350" text-anchor="middle" class="tiny" fill="#e87522">3.3V to ESP VCC</text>
+
+  <!-- LEDs wired to Uno -->
+  <rect x="470" y="780" width="450" height="115" class="board module"/>
+  <circle cx="600" cy="780" r="6" class="terminal"/><text x="615" y="820" class="tiny bold">D8 · fan</text>
+  <circle cx="760" cy="780" r="6" class="terminal"/><text x="775" y="860" class="tiny bold">D9 · pump</text>
+  <text x="695" y="808" text-anchor="middle" class="label bold">LED + 220Ω SERIES RESISTOR</text>
+  <path d="M600 780 V835 H640 M660 835 H680 M728 835 H770" class="wire green thin"/>
+  <circle cx="650" cy="835" r="10" fill="#fff" stroke="#16805e" stroke-width="2"/>
+  <rect x="680" y="824" width="48" height="22" class="divider"/>
+  <path d="M770 835 V842 M760 842 H780 M763 847 H777 M766 852 H774" class="wire black thin"/>
+  <path d="M760 780 V875 H800 M820 875 H840 M888 875 H910" class="wire green thin"/>
+  <circle cx="810" cy="875" r="10" fill="#fff" stroke="#16805e" stroke-width="2"/>
+  <rect x="840" y="864" width="48" height="22" class="divider"/>
+  <path d="M910 875 V882 M900 882 H920 M903 887 H917 M906 892 H914" class="wire black thin"/>
+
+  <rect x="70" y="780" width="350" height="115" class="board power"/>
+  <text x="90" y="812" class="small bold">POWER / LOAD NOTES</text>
+  <text x="90" y="837" class="tiny">Uno 5V → relay logic + regulator.</text>
+  <text x="90" y="857" class="tiny">Size supply for ESP Wi-Fi bursts.</text>
+  <text x="90" y="877" class="tiny">12V loads use COM/NO; verify ratings.</text>
+
+  <!-- Flash mode -->
+  <rect x="35" y="955" width="1530" height="265" class="panel"/>
+  <text x="70" y="996" class="section">TEMPORARY ESP FLASH WIRING</text>
+  <text x="70" y="1023" class="subtitle">Disconnect the running D10 / D11 serial wires while uploading.</text>
+  <path d="M570 1100 H760" class="wire blue"/>
+  <path d="M570 1150 H610" class="wire blue"/>
+  <rect x="610" y="1138" width="50" height="24" class="divider"/>
+  <path d="M660 1150 H760" class="wire blue"/>
+  <circle cx="660" cy="1150" r="5" fill="#2563c6"/>
+  <path d="M660 1150 V1170" class="wire black"/>
+  <rect x="645" y="1165" width="30" height="18" class="divider"/>
+  <path d="M660 1183 V1190" class="wire black"/>
+  <text x="635" y="1132" text-anchor="middle" class="tiny">1kΩ</text>
+  <text x="680" y="1182" class="tiny">2kΩ → GND</text>
+
+  <rect x="70" y="1045" width="500" height="135" class="board uno"/>
+  <text x="95" y="1080" class="label bold">UNO · RESET tied to GND</text>
+  <circle cx="570" cy="1100" r="6" class="terminal"/><text x="545" y="1094" text-anchor="end" class="small bold">D0 RX</text>
+  <circle cx="570" cy="1150" r="6" class="terminal"/><text x="545" y="1144" text-anchor="end" class="small bold">D1 TX</text>
+  <rect x="760" y="1045" width="390" height="135" class="board esp"/>
+  <text x="955" y="1080" text-anchor="middle" class="label bold">ESP UART0</text>
+  <circle cx="760" cy="1100" r="6" class="terminal"/><text x="785" y="1094" class="small bold">GPIO1 TX</text>
+  <circle cx="760" cy="1150" r="6" class="terminal"/><text x="785" y="1144" class="small bold">GPIO3 RX</text>
+  <text x="955" y="1170" text-anchor="middle" class="tiny">GPIO0 → GND to enter flash mode</text>
+  <rect x="1180" y="1045" width="350" height="135" class="board power"/>
+  <text x="1355" y="1080" text-anchor="middle" class="label bold">UPLOAD</text>
+  <text x="1205" y="1110" class="small">Use NodeMCU 1.0 profile.</text>
+  <text x="1205" y="1140" class="small">After upload, remove both</text>
+  <text x="1205" y="1164" class="small">jumpers and restore running link.</text>
+  <text x="800" y="1200" text-anchor="middle" class="small bold">Never connect Uno D1 5V directly to ESP GPIO3 RX.</text>
+</svg>

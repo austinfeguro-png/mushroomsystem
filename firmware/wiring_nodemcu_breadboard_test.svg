@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="1000" viewBox="0 0 1500 1000" role="img" aria-labelledby="title desc">
+<title id="title">Bio-Sync complete Uno and NodeMCU initial test wiring</title>
+<desc id="desc">Arduino Uno reads a three-pin DHT22 and runs fan and pump state indicator LEDs. NodeMCU connects over a crossed serial link through a 1k/2k divider. Both are USB powered with common ground. Relay connection requires a suitable driver module for the 12V relay.</desc>
+<defs><style>
+text{font-family:Arial,Helvetica,sans-serif;fill:#182330}.title{font-size:30px;font-weight:700}.sub{font-size:16px;fill:#526273}.head{font-size:20px;font-weight:700}.label{font-size:15px}.small{font-size:13px}.tiny{font-size:11px}.bold{font-weight:700}.muted{fill:#526273}.box{stroke:#344454;stroke-width:2.5;rx:16}.uno{fill:#eaf2fb}.esp{fill:#eaf5eb}.mod{fill:#f4efff}.warn{fill:#fff2dc}.wire{fill:none;stroke-width:4;stroke-linecap:round;stroke-linejoin:round}.red{stroke:#d94343}.black{stroke:#303943}.blue{stroke:#2563c6}.green{stroke:#16805e}.part{fill:#fff3ca;stroke:#9a7417;stroke-width:2}
+</style></defs>
+<rect width="1500" height="1000" fill="#f7f9fb"/>
+<text x="750" y="44" text-anchor="middle" class="title">BIO-SYNC · COMPLETE INITIAL TEST WIRING</text>
+<text x="750" y="72" text-anchor="middle" class="sub">Arduino Uno + NodeMCU ESP-12E + 3-pin DHT22 + breadboard + two state LEDs</text>
+<rect x="80" y="115" width="390" height="150" class="box mod"/>
+<text x="275" y="150" text-anchor="middle" class="head">3-PIN DHT22 MODULE</text>
+<text x="110" y="190" class="label bold">VCC → Uno 5V</text><text x="110" y="220" class="label bold">DATA → Uno D2</text><text x="305" y="190" class="label bold">GND → Uno GND</text>
+<text x="275" y="248" text-anchor="middle" class="tiny muted">Follow the sensor’s printed pin labels; order varies.</text>
+<rect x="80" y="330" width="450" height="440" class="box uno"/>
+<text x="305" y="370" text-anchor="middle" class="head">ARDUINO UNO</text><text x="305" y="395" text-anchor="middle" class="small muted">Sensor + actuator logic</text>
+<text x="110" y="440" class="label bold">D2 · DHT22 DATA</text><text x="110" y="485" class="label bold">D4 · FAN relay input*</text><text x="110" y="530" class="label bold">D5 · PUMP relay input*</text>
+<text x="110" y="585" class="label bold">D8 · FAN indicator LED</text><text x="110" y="635" class="label bold">D9 · PUMP indicator LED</text><text x="110" y="695" class="label bold">D10 RX · from NodeMCU D7 TX</text><text x="110" y="735" class="label bold">D11 TX · divider to NodeMCU D6 RX</text>
+<rect x="630" y="370" width="310" height="235" class="box"/>
+<text x="785" y="402" text-anchor="middle" class="head">BREADBOARD · LED TEST</text>
+<text x="660" y="438" class="small bold">D8 → 220–330Ω → LED → GND</text><rect x="665" y="452" width="70" height="21" class="part"/><circle cx="770" cy="462" r="12" fill="#fff1ae" stroke="#c43c3c" stroke-width="3"/>
+<text x="660" y="498" class="small bold">D9 → 220–330Ω → LED → GND</text><rect x="665" y="512" width="70" height="21" class="part"/><circle cx="770" cy="522" r="12" fill="#fff1ae" stroke="#c43c3c" stroke-width="3"/>
+<path d="M782 462 H850 V555 M782 522 H850 M850 555 V570" class="wire black"/><text x="790" y="590" text-anchor="middle" class="tiny muted">One resistor per LED; short LED leg to GND</text>
+<rect x="1010" y="300" width="410" height="355" class="box esp"/>
+<text x="1215" y="340" text-anchor="middle" class="head">NodeMCU ESP-12E</text><text x="1215" y="366" text-anchor="middle" class="small muted">USB powered · built-in 3.3V regulator</text>
+<text x="1040" y="425" class="label bold">D7 / GPIO13 TX → Uno D10</text><text x="1040" y="485" class="label bold">D6 / GPIO12 RX ← Uno D11 divider</text><text x="1040" y="565" class="label bold">GND → shared Uno GND</text><text x="1215" y="620" text-anchor="middle" class="tiny muted">Keep NodeMCU 3V3 separate from Uno 5V.</text>
+<path d="M520 690 H970 V425 H1010" class="wire blue"/><path d="M520 730 H700 V785 H970 V485 H1010" class="wire blue"/>
+<rect x="700" y="775" width="58" height="20" class="part"/><text x="729" y="769" text-anchor="middle" class="tiny">1kΩ series</text><path d="M729 785 V830" class="wire black"/><rect x="714" y="808" width="30" height="18" class="part"/><text x="750" y="824" class="tiny">2kΩ to GND</text>
+<path d="M360 580 H650 V440 H630 M360 630 H680 V500 H630" class="wire green"/>
+<path d="M145 450 H65 V180 H80 M130 430 H55 V155 H80 M165 470 H45 V235 H80" class="wire blue"/>
+<path d="M510 755 H970 V565 H1010" class="wire black"/>
+<rect x="80" y="810" width="550" height="115" class="box warn"/><text x="105" y="845" class="label bold">POWER FOR THIS TEST</text><text x="105" y="872" class="small">Power Uno and NodeMCU from their own USB ports;</text><text x="105" y="896" class="small">join GND only. Do not connect Uno 5V to NodeMCU VIN.</text>
+<rect x="970" y="710" width="450" height="215" class="box warn"/><text x="1195" y="748" text-anchor="middle" class="head">12V RELAY · NOT DIRECT TO GPIO</text>
+<text x="1000" y="785" class="small">D4 / D5 are relay-control outputs in the firmware.</text><text x="1000" y="812" class="small bold">For LED-only testing, leave relay coil/load disconnected.</text><text x="1000" y="835" class="small bold">D8/D9 show commanded fan/pump states.</text>
+<text x="1000" y="870" class="tiny">A bare 12V relay needs a transistor/driver and flyback diode.</text><text x="1000" y="892" class="tiny">Use a compatible relay driver module before connecting D4/D5.</text>
+<text x="750" y="970" text-anchor="middle" class="tiny muted">* Firmware assumes active-LOW relay inputs. Do not connect a bare relay coil to Uno pins.</text>
+</svg>

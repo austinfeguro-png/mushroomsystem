@@ -4,7 +4,7 @@
 
 - The root PHP pages provide login, dashboard controls, live data, user administration, notifications, profile, and history views. `config.php` provides the shared PDO connection.
 - `api_update.php` accepts authenticated form-encoded sensor readings from the ESP8266, writes sensor history and device state, and returns actuator commands and stage thresholds.
-- `sketch_may16a/sketch_may16a.ino` reads the DHT22, sends the authenticated POST, and keeps local threshold overrides aligned with the active server stage. Local WiFi and API token values belong in the ignored `sketch_may16a/secrets.h` file, copied from its example.
+- `firmware/uno/uno.ino` reads the DHT22 and controls relays; `firmware/esp12e/esp12e.ino` sends authenticated readings to the API and forwards validated commands. Local Wi-Fi and API token values belong in the ignored `firmware/esp12e/secrets.h`, copied from its example.
 - `biosync_ml/train_models.py` trains the classifiers from paired sensor readings. `prediction_api.py` serves predictions and metrics on loopback port 5000; `ml_widget.php` calls that service server-side.
 
 ## Database and Thresholds

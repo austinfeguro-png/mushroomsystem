@@ -1,4 +1,4 @@
-// NodeMCU 1.0 (ESP-12E): Wi-Fi bridge for firmware/biosync_uno.
+// NodeMCU 1.0 (ESP-12E): Wi-Fi bridge for firmware/uno.
 // No sensors or relays attach to this board. D6 = RX, D7 = TX.
 #include <ESP8266WiFi.h>
 #include <ESP8266HTTPClient.h>
@@ -7,7 +7,7 @@
 #include "protocol.h"
 #include "rx_guard.h"
 
-const char* SERVER_URL = "http://192.168.43.178/mushroomsystem/api_update.php";
+const char* SERVER_URL = "http://192.168.1.41/mushroomsystem/api_update.php";
 SoftwareSerial unoLink(D6, D7); // RX from Uno D11 divider, TX to Uno D10.
 const unsigned long POST_INTERVAL = 5000UL;
 const unsigned long READING_TIMEOUT = 8000UL;
@@ -15,8 +15,10 @@ const unsigned long WIFI_RETRY = 15000UL;
 const unsigned long LOG_INTERVAL = 10UL * 60UL * 1000UL;
 BioSync::LineBuffer incoming;
 BioSync::Reading reading = {0, 0};
-bool haveReading = false, firstLogPending = true;
-unsigned long lastReading = 0, lastPost = 0, lastWiFiTry = 0, lastLoggedAt = 0;
+BioSync::OutputState outputState = {false, false};
+bool haveReading = false, haveOutputState = false, firstLogPending = true;
+unsigned long lastReading = 0, lastOutputState = 0, lastPost = 0;
+unsigned long lastStatePost = 0, lastWiFiTry = 0, lastLoggedAt = 0;
 
 // Retain event subscriptions. Callbacks only record codes; print from loop().
 WiFiEventHandler disconnectedHandler, associatedHandler, dhcpTimeoutHandler;
@@ -151,6 +153,9 @@ void readUno() {
     (void)unoLink.available(); // Decode a finite snapshot with D6 detached.
     unoLink.flush();
     unoLink.println(F("ERR:LINK")); // Uno immediately applies its existing fail-safe.
+    outputState = {false, false};
+    haveOutputState = true; // The Uno drops both outputs when this invalid frame is received.
+    lastOutputState = millis();
     if (millis() - lastFrameWarning >= 5000UL) {
       lastFrameWarning = millis();
       Serial.println(F("[Uno] D6 interrupt flood blocked; readings discarded, RX cooling down."));
@@ -174,6 +179,7 @@ void readUno() {
     ++processed;
     if (incoming.push((char)unoLink.read())) {
       BioSync::Reading candidate;
+      BioSync::OutputState state;
       if (BioSync::parseReading(incoming.data, candidate)) {
         reading = candidate;
         lastReading = millis();
@@ -181,6 +187,16 @@ void readUno() {
         if (!receivedFirstReading) {
           receivedFirstReading = true;
           Serial.println(F("[Uno] First valid readings received."));
+        }
+      } else if (BioSync::parseOutputState(incoming.data, state)) {
+        outputState = state;
+        haveOutputState = true;
+        lastOutputState = millis();
+      } else if (strncmp(incoming.data, "ERR:", 4) == 0) {
+        // Never POST the previous sample after the Uno reports a sensor/link fault.
+        haveReading = false;
+        if (strncmp(incoming.data, "ERR:SENSOR", 10) == 0) {
+          Serial.println(F("[Uno] Sensor fault; discarding cached reading."));
         }
       } else {
         haveReading = false;
@@ -212,6 +228,10 @@ bool sendDataToServer(float temp, float hum, bool logReading) {
   http.addHeader("X-Device-Token", BIOSYNC_DEVICE_TOKEN);
   String body = "temp=" + String(temp, 1) + "&hum=" + String(hum, 1)
               + "&log=" + String(logReading ? 1 : 0);
+  if (haveOutputState && millis() - lastOutputState < READING_TIMEOUT) {
+    body += "&fan_actual=" + String(outputState.fan ? 1 : 0)
+          + "&pump_actual=" + String(outputState.pump ? 1 : 0);
+  }
   Serial.print(F("[HTTP] Starting POST; free heap=")); Serial.println(ESP.getFreeHeap());
   int code = http.POST(body);
   Serial.print(F("POST -> HTTP ")); Serial.println(code);
@@ -240,6 +260,24 @@ bool sendDataToServer(float temp, float hum, bool logReading) {
     Serial.println(F("No valid command; Uno outputs off"));
   }
   return ok; // Successful POST is logged even if the serial link became stale.
+}
+
+void sendOutputStateToServer() {
+  if (!haveOutputState || millis() - lastOutputState >= READING_TIMEOUT
+      || BIOSYNC_DEVICE_TOKEN[0] == '\0') return;
+  WiFiClient client;
+  HTTPClient http;
+  http.setTimeout(1500);
+  if (!http.begin(client, SERVER_URL)) return;
+  http.addHeader("Content-Type", "application/x-www-form-urlencoded");
+  http.addHeader("X-Device-Token", BIOSYNC_DEVICE_TOKEN);
+  String body = "state_only=1&fan_actual=" + String(outputState.fan ? 1 : 0)
+              + "&pump_actual=" + String(outputState.pump ? 1 : 0);
+  int code = http.POST(body);
+  if (code != HTTP_CODE_OK) {
+    Serial.print(F("[HTTP] Output-state update failed: ")); Serial.println(code);
+  }
+  http.end();
 }
 
 void setup() {
@@ -284,6 +322,9 @@ void loop() {
       firstLogPending = false;
       lastLoggedAt = millis();
     }
+  } else if (!freshReading() && haveOutputState && now - lastStatePost >= POST_INTERVAL) {
+    lastStatePost = now;
+    sendOutputStateToServer();
   }
   yield();
 }
