@@ -62,7 +62,7 @@ Test relay polarity with the loads disconnected first.
 2. Open `firmware/esp12e/esp12e.ino`. Select **NodeMCU 1.0 (ESP-12E Module)**
    and its separate USB port. Install the ESP8266 board package if needed.
 3. Set the NodeMCU's `SERVER_URL` to the laptop's current Wi-Fi IPv4 address.
-   Current default: `http://192.168.43.178/mushroomsystem/api_update.php`.
+   Current sketch default: `http://192.168.1.41/mushroomsystem/api_update.php`.
 4. Copy `firmware/esp12e/secrets.h.example` to `secrets.h` only if it does not
    already exist. Preserve the existing private file. Enter Wi-Fi credentials
    and a nonempty `BIOSYNC_DEVICE_TOKEN` matching Apache's environment variable

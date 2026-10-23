@@ -60,6 +60,7 @@ login = read("login.php")
 sketch= read("firmware/esp12e/esp12e.ino")
 uno = read("firmware/uno/uno.ino")
 protocol = read("firmware/esp12e/protocol.h")
+firmware_readme = read("firmware/README.md")
 
 # -------------------------------------------------------------
 print("=== 1. Dashboard JS live-update contract vs live_data.php ===")
@@ -139,8 +140,12 @@ check("Arduino sends authenticated form-encoded POST data",
       and 'http.addHeader("Content-Type", "application/x-www-form-urlencoded")' in sketch
       and '"temp=" + String(temp, 1)' in sketch
       and '"&hum=" + String(hum, 1)' in sketch)
-check("ESP8266 targets the LAN server and loads private configuration",
-      'http://192.168.43.178/mushroomsystem/api_update.php' in sketch
+server_url = re.search(r'const char\* SERVER_URL = "([^"]+)";', sketch)
+documented_server_url = re.search(r'Current sketch default: `([^`]+)`', firmware_readme)
+check("ESP8266 server URL matches the documented LAN endpoint and loads private configuration",
+      server_url is not None and documented_server_url is not None
+      and server_url.group(1) == documented_server_url.group(1)
+      and server_url.group(1).endswith("/mushroomsystem/api_update.php")
       and '#include "secrets.h"' in sketch
       and 'BIOSYNC_DEVICE_TOKEN[0]' in sketch
       and 'const char* WIFI_PASS' not in sketch)
@@ -152,9 +157,13 @@ check("api_update honors firmware log flag while preserving legacy clients",
       "$shouldLog = !isset($_POST['log']) || (string)$_POST['log'] !== '0';" in api
       and "if ($shouldLog)" in api
       and "INSERT INTO sensor_logs (device_id, recorded_value, recorded_at, stage)" in api)
-check("server actuator rules turn fan on for high humidity and pump on only for low humidity",
-      "$humidity > $MAX_HUM" in api.split("$fanState", 1)[1].split("try {", 1)[0]
-      and "$pumpState = $humidity < $MIN_HUM ? 1 : 0;" in api)
+check("server AUTO actuator rules and saved manual modes match the firmware command",
+      "$fanAuto  = ($temperature > $MAX_TEMP || $humidity > $MAX_HUM) ? 1 : 0;" in api
+      and "$pumpAuto = $humidity < $MIN_HUM ? 1 : 0;" in api
+      and "($settings['fan_control_mode'] ?? 'auto') === 'manual'" in api
+      and "($settings['pump_control_mode'] ?? 'auto') === 'manual'" in api
+      and 'FAN_MODE=" . strtoupper($fanMode)' in api
+      and 'PUMP_MODE=" . strtoupper($pumpMode)' in api)
 check("api_update inserts stage column into sensor_logs",
       "INSERT INTO sensor_logs (device_id, recorded_value, recorded_at, stage)" in api)
 check("sketch posts to /mushroomsystem/api_update.php",
