@@ -23,5 +23,6 @@
     "Warning": 19,
     "Normal": 14
   },
-  "total_samples": 74
+  "total_samples": 74,
+  "evaluation_note": "Condition labels are generated from the stage thresholds encoded in the trainer. Scores measure reproduction of those rules, not independent biological validation."
 }

@@ -10,7 +10,7 @@ Bio-Sync is an IoT system that monitors temperature and humidity in a growing en
 - **User management** — admin/user roles, bcrypt-hashed passwords, account activation/deactivation
 - **Notifications center** — in-app alerts with read/unread state
 - **Historical data** — sensor logs stored in MariaDB with history charts
-- **ML predictions** — trains Decision Tree / Random Forest / KNN models on collected data and serves predictions via a Flask API
+- **ML predictions** — trains Decision Tree / Random Forest / KNN models on collected data and serves predictions via a Flask API. Training labels are generated from stage thresholds encoded in the trainer, so reported scores measure rule reproduction rather than independent biological validation.
 
 ## 🏗️ Architecture
 
@@ -45,6 +45,11 @@ Three components work together:
 ├── notificationspage.php     # Notification center
 ├── historicaldatapage.php    # Historical sensor data
 ├── biosync_db.sql            # Full database schema + seed data
+├── docs/
+│   ├── knowledge.md          # Project behavior and component notes
+│   ├── SYSTEM_DIAGRAMS.md    # Architecture and data-flow diagrams
+│   └── reference/
+│       └── Bio-Sync Project Overview.docx # Project manuscript / overview
 ├── biosync_ml/
 │   ├── train_models.py       # One-shot model trainer
 │   ├── prediction_api.py     # Flask prediction API (port 5000)
@@ -102,6 +107,8 @@ voltage divider to NodeMCU D6 RX. Share ground. The serial link is 9600 baud;
 both USB Serial Monitors use 115200 baud.
 
 See [firmware setup, power, upload and bench checks](firmware/README.md).
+See [architecture diagrams](docs/SYSTEM_DIAGRAMS.md), [project notes](docs/knowledge.md),
+and the [project overview manuscript](docs/reference/Bio-Sync%20Project%20Overview.docx).
 Disconnect the Uno 5V-to-NodeMCU VIN jumper when powering both boards by USB.
 Keep Wi-Fi credentials and the matching Apache `BIOSYNC_DEVICE_TOKEN` in the
 ignored `firmware/esp12e/secrets.h`. Set the laptop Wi-Fi IP in the ESP bridge

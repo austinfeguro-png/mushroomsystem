@@ -157,6 +157,14 @@ if df['condition'].nunique() < 2:
     print("\n  [WARNING] Only one condition class found. Collect more varied readings.")
     exit(1)
 
+if counts.min() < 2:
+    sparse_classes = ', '.join(
+        f"{label} ({count})" for label, count in counts.items() if count < 2
+    )
+    print("\n  [WARNING] Stratified training requires at least 2 readings per condition class.")
+    print(f"            Too few readings for: {sparse_classes}. Collect more data and retry.")
+    exit(1)
+
 # ----------------------------------------------------------
 # FIX (Issue 5): Class imbalance detection + balanced weights
 # ----------------------------------------------------------
@@ -259,6 +267,10 @@ with open('biosync_models.pkl','wb') as f:
     pickle.dump(trained, f)
 
 print("[7/7] Saving ml_results.json ...")
+evaluation_note = (
+    "Condition labels are generated from the stage thresholds encoded in the trainer. "
+    "Scores measure reproduction of those rules, not independent biological validation."
+)
 with open('ml_results.json','w') as f:
     json.dump({
         'best_model'    : best_name,
@@ -266,6 +278,7 @@ with open('ml_results.json','w') as f:
         'imbalanced'    : use_balanced,
         'class_balance' : {k: int(v) for k, v in counts.items()},
         'total_samples' : len(df),
+        'evaluation_note': evaluation_note,
     }, f, indent=2)
 
 print("\n[DONE] Run prediction_api.py next.\n")

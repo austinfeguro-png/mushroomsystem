@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-The PHP application lives in the repository root. Pages such as `dashboard.php`, `login.php`, and `historicaldatapage.php` handle the web interface; `api_update.php` accepts hardware readings and `live_data.php` supplies dashboard data. `config.php` centralizes the PDO database connection. `biosync_db.sql` defines the MariaDB schema and seed data. The Python prediction service and trainer are in `biosync_ml/`; Arduino sketches are organized by board in `firmware/uno/` and `firmware/esp12e/`. Static cross-file checks are in `tests/`.
+The PHP application lives in the repository root because XAMPP and the ESP device endpoint expect those paths. Pages such as `dashboard.php`, `login.php`, and `historicaldatapage.php` handle the web interface; `api_update.php` accepts hardware readings and `live_data.php` supplies dashboard data. `config.php` centralizes the PDO database connection. `biosync_db.sql` defines the MariaDB schema and seed data. Project notes, diagrams, and the overview manuscript are in `docs/`; the Python prediction service and trainer are in `biosync_ml/`; Arduino sketches are organized by board in `firmware/uno/` and `firmware/esp12e/`. Static cross-file checks are in `tests/`.
 
 ## Build, Test, and Development Commands
 
