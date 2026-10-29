@@ -62,8 +62,10 @@ Test relay polarity with the loads disconnected first.
 2. Open `firmware/esp12e/esp12e.ino`. Select **NodeMCU 1.0 (ESP-12E Module)**
    and its separate USB port. Install the ESP8266 board package if needed.
 3. Set `BIOSYNC_SERVER_URL` in `secrets.h` to the deployed API's HTTPS URL,
-   using its public hostname (not an IP address), for example:
-   `https://your-domain.example/mushroomsystem/api_update.php`.
+   using its public hostname (not an IP address). The host must accept direct
+   device POST requests without a browser JavaScript/cookie challenge. The free
+   InfinityFree plan does not meet this requirement; it returns an `aes.js`
+   browser challenge to the ESP8266 instead of running the API script.
 4. Copy `firmware/esp12e/secrets.h.example` to `secrets.h` only if it does not
    already exist. Preserve the existing private file. Enter Wi-Fi credentials
    and a nonempty `BIOSYNC_DEVICE_TOKEN` matching Apache's environment variable

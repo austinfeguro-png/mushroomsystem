@@ -271,14 +271,22 @@ bool sendDataToServer(float temp, float hum, bool logReading) {
   bool ok = false;
   if (code == HTTP_CODE_OK) {
     Serial.println(F("[HTTP] Reading bounded command reply"));
-    // Reject known oversize bodies before transfer; chunked/unknown sizes are
-    // limited by availableForWrite() and rejected if the buffer fills.
-    if (http.getSize() < (int)sizeof(reply.data) - 1) {
-      int bytes = http.writeToStream(&reply);
-      BioSync::Command validated;
-      ok = bytes > 0 && !reply.overflow && BioSync::parseCommand(reply.data, validated);
-    }
+    // Keep the response diagnostic bounded. Oversize bodies capture only the
+    // first 127 bytes and remain ineligible as actuator commands.
+    int responseSize = http.getSize();
+    Serial.print(F("[HTTP] Reply content-length=")); Serial.println(responseSize);
+    int bytes = http.writeToStream(&reply);
+    Serial.print(F("[HTTP] Reply bytes read=")); Serial.println(bytes);
+    BioSync::Command validated;
+    ok = bytes > 0 && !reply.overflow && BioSync::parseCommand(reply.data, validated);
     Serial.print(F("[HTTP] Reply validated=")); Serial.println(ok ? F("yes") : F("no"));
+    if (!ok) {
+      Serial.print(F("[HTTP] Rejected reply prefix: "));
+      Serial.println(reply.data);
+      if (strstr(reply.data, "/aes.js") != nullptr) {
+        Serial.println(F("[HTTP] Browser JavaScript challenge detected; this ESP cannot access the free-host API."));
+      }
+    }
   } else if (code == 403) {
     Serial.println(F("Device token rejected; check Apache BIOSYNC_DEVICE_TOKEN."));
   }
