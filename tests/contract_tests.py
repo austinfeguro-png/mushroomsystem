@@ -48,6 +48,7 @@ def read(p):
 dash  = read("dashboard.php")
 live  = read("live_data.php")
 api   = read("api_update.php")
+config = read("config.php")
 sql   = read("biosync_db.sql")
 mlw   = read(os.path.join("biosync_ml", "ml_widget.php"))
 pred  = read(os.path.join("biosync_ml", "prediction_api.py"))
@@ -132,20 +133,30 @@ check("api_update validates sensor ranges",
 check("api_update requires POST, a configured device token, and numeric values",
       "$_SERVER['REQUEST_METHOD'] !== 'POST'" in api
       and "getenv('BIOSYNC_DEVICE_TOKEN')" in api
+      and "defined('BIOSYNC_DEVICE_TOKEN') ? BIOSYNC_DEVICE_TOKEN : ''" in api
       and "is_numeric($temperatureRaw)" in api
       and "is_numeric($humidityRaw)" in api)
+check("hosting database settings stay in ignored local config with local defaults",
+      "config.local.php" in config
+      and "BIOSYNC_DB_HOST" in config
+      and "'localhost'" in config
+      and "/config.local.php" in read(".gitignore")
+      and "BIOSYNC_DEVICE_TOKEN" in read("config.local.php.example"))
 check("Arduino sends authenticated form-encoded POST data",
       'http.POST(body)' in sketch
       and 'http.addHeader("X-Device-Token", BIOSYNC_DEVICE_TOKEN)' in sketch
       and 'http.addHeader("Content-Type", "application/x-www-form-urlencoded")' in sketch
       and '"temp=" + String(temp, 1)' in sketch
       and '"&hum=" + String(hum, 1)' in sketch)
-server_url = re.search(r'const char\* SERVER_URL = "([^"]+)";', sketch)
-documented_server_url = re.search(r'Current sketch default: `([^`]+)`', firmware_readme)
-check("ESP8266 server URL matches the documented LAN endpoint and loads private configuration",
-      server_url is not None and documented_server_url is not None
-      and server_url.group(1) == documented_server_url.group(1)
-      and server_url.group(1).endswith("/mushroomsystem/api_update.php")
+check("ESP8266 requires HTTPS with CA validation and private deployment settings",
+      'const char* SERVER_URL = BIOSYNC_SERVER_URL;' in sketch
+      and 'BearSSL::WiFiClientSecure client;' in sketch
+      and 'client.setTrustAnchors(serverTrustAnchor);' in sketch
+      and 'strncmp(SERVER_URL, "https://", 8) != 0' in sketch
+      and 'strlen_P(BIOSYNC_ROOT_CA) == 0' in sketch
+      and 'configTime(0, 0, "pool.ntp.org", "time.nist.gov")' in sketch
+      and 'const char* BIOSYNC_SERVER_URL = "https://your-domain.example/' in read("firmware/esp12e/secrets.h.example")
+      and 'BIOSYNC_ROOT_CA' in read("firmware/esp12e/secrets.h.example")
       and '#include "secrets.h"' in sketch
       and 'BIOSYNC_DEVICE_TOKEN[0]' in sketch
       and 'const char* WIFI_PASS' not in sketch)
@@ -153,6 +164,10 @@ check("firmware requests sensor-log persistence every 10 minutes",
       "10UL * 60UL * 1000UL" in sketch
       and "sendDataToServer(reading.temperature, reading.humidity, logReading)" in sketch
       and '"&log=" + String(logReading ? 1 : 0)' in sketch)
+check("firmware syncs every 10 seconds within the Uno 30-second command timeout",
+      "const unsigned long POST_INTERVAL = 10000UL;" in sketch
+      and "const unsigned long COMMAND_TIMEOUT = 30000UL;" in uno
+      and "now - lastPost >= POST_INTERVAL" in sketch)
 check("api_update honors firmware log flag while preserving legacy clients",
       "$shouldLog = !isset($_POST['log']) || (string)$_POST['log'] !== '0';" in api
       and "if ($shouldLog)" in api
@@ -252,7 +267,7 @@ check("prediction_api stage thresholds mirror api_update defaults",
 print("=== 7. biosync_db.sql integrity ===")
 m = re.search(r"INSERT INTO `sensor_logs` \(([^)]*)\) VALUES", sql)
 check("sensor_logs INSERT column list matches VALUES arity",
-      m is not None and m.group(1).count(",") + 1 == 4)
+      m is not None and m.group(1).count(",") + 1 == 5)
 check("sensor_logs has stage column", "`stage` varchar(20)" in sql)
 check("composite index device_recorded_idx exists", "device_recorded_idx" in sql)
 stage_keys = re.findall(r"\('([a-z_]+_(?:min_temp|max_temp|min_hum|max_hum|default_days)"
@@ -260,9 +275,37 @@ stage_keys = re.findall(r"\('([a-z_]+_(?:min_temp|max_temp|min_hum|max_hum|defau
                         sql)
 check("all 19 stage-system setting keys seeded", len(set(stage_keys)) == 19,
       f"found {len(set(stage_keys))}: {sorted(set(stage_keys))}")
-check("sensor_logs.seed rows do not set stage (uses column default)",
-      re.search(r"INSERT INTO `sensor_logs` \(`id`, `device_id`, `recorded_value`, `recorded_at`\)", sql)
-      is not None)
+seed_insert = re.search(
+    r"INSERT INTO `sensor_logs` \(`id`, `device_id`, `recorded_value`, `recorded_at`, `stage`\) VALUES(.*?);",
+    sql, re.S)
+seed_stages = set(re.findall(r"'(?P<stage>colonization|pinning|fruiting)'\)\s*[,;]", seed_insert.group(1))) if seed_insert else set()
+check("sensor log demo seeds explicitly cover all three growth stages",
+      seed_stages == {"colonization", "pinning", "fruiting"})
+seed_rows = re.findall(
+    r"\(\d+,\s*(\d+),\s*([-\d.]+),\s*'([^']+)',\s*'(colonization|pinning|fruiting)'\)",
+    seed_insert.group(1)) if seed_insert else []
+seed_values = {(stage, timestamp, int(device_id)): float(value)
+               for device_id, value, timestamp, stage in seed_rows}
+seed_condition_coverage = {stage: set() for stage in EXPECTED}
+for stage in EXPECTED:
+    min_temp, max_temp, min_hum, max_hum = EXPECTED[stage]
+    for (row_stage, timestamp, device_id), temperature in seed_values.items():
+        humidity = seed_values.get((row_stage, timestamp, 2))
+        if row_stage != stage or device_id != 1 or humidity is None:
+            continue
+        if temperature < min_temp or temperature > max_temp:
+            condition = "Critical"
+        elif humidity < min_hum or humidity > max_hum:
+            condition = "Warning"
+        else:
+            condition = "Normal"
+        seed_condition_coverage[stage].add(condition)
+check("sensor demo seeds cover normal, warning, and critical in every stage",
+      all(conditions == {"Normal", "Warning", "Critical"}
+          for conditions in seed_condition_coverage.values()))
+check("initial seeded sensor values are normal for colonization",
+      "(1, 'Temperature Node 1', '26', '°C')" in sql
+      and "(2, 'Humidity Node 1', '80', '%')" in sql)
 check("settings table has PRIMARY KEY (ON DUPLICATE KEY UPDATE works)",
       "ADD PRIMARY KEY (`setting_key`)" in sql)
 

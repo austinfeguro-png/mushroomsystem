@@ -61,13 +61,18 @@ Test relay polarity with the loads disconnected first.
    Sensor** dependency if needed. Upload.
 2. Open `firmware/esp12e/esp12e.ino`. Select **NodeMCU 1.0 (ESP-12E Module)**
    and its separate USB port. Install the ESP8266 board package if needed.
-3. Set the NodeMCU's `SERVER_URL` to the laptop's current Wi-Fi IPv4 address.
-   Current sketch default: `http://192.168.1.41/mushroomsystem/api_update.php`.
+3. Set `BIOSYNC_SERVER_URL` in `secrets.h` to the deployed API's HTTPS URL,
+   using its public hostname (not an IP address), for example:
+   `https://your-domain.example/mushroomsystem/api_update.php`.
 4. Copy `firmware/esp12e/secrets.h.example` to `secrets.h` only if it does not
    already exist. Preserve the existing private file. Enter Wi-Fi credentials
    and a nonempty `BIOSYNC_DEVICE_TOKEN` matching Apache's environment variable
-   of the same name. Restart Apache after changing its environment. The file is
-   ignored by Git; never put real values in the example or logs.
+   of the same name. Paste the HTTPS server's trusted CA certificate into
+   `BIOSYNC_ROOT_CA` as a PEM certificate array in flash. The bridge rejects
+   non-HTTPS URLs, verifies the server
+   certificate, and waits for NTP time before connecting. Restart Apache after
+   changing its environment. `secrets.h` is ignored by Git; never put real
+   credentials or deployment-specific certificates in the example or logs.
 5. Upload the NodeMCU sketch. Serial Monitor is **115200 baud on both USB ports**;
    the board-to-board serial link is independently **9600 baud**.
 
@@ -86,7 +91,7 @@ credentials/security/signal, and `200 BEACON_TIMEOUT` indicates lost beacons.
 be caused by the sketch retrying; do not interpret that alone as a router fault.
 Copy the `[WiFi]` lines when troubleshooting; keep `secrets.h` private.
 
-### Reset and HTTP diagnostics
+### Reset and HTTPS diagnostics
 
 The NodeMCU prints `[Boot] Reset reason` and free heap at startup. The first
 valid Uno frame produces `[Uno] First valid readings received`. `[HTTP]` markers
@@ -130,11 +135,12 @@ boards USB-powered with the 5V-to-VIN jumper removed during this test.
 - Uno samples every three seconds, sends `DATA:TEMP=27.0,HUM=80.0`, and controls
   its own outputs. Invalid/non-finite readings, out-of-range pairs, and `0/0`
   turn both relays off. No arbitrary universal rate-of-change limit is imposed.
-- NodeMCU syncs fresh readings every five seconds using authenticated form POST:
+- NodeMCU syncs fresh readings every ten seconds using authenticated form POST:
   `temp`, `hum`, `log`, and `X-Device-Token`. It includes `fan_actual` and
   `pump_actual` only when it has recent Uno output feedback. It requests a database log on the
   first successful request and every ten minutes thereafter, not on every sync.
-  PHP/Apache and MariaDB must be running. HTTP 403 indicates token configuration.
+  PHP/Apache and MariaDB must be running. HTTP 403 indicates token configuration;
+  TLS certificate or clock errors prevent the request from being sent.
   An Uno `ERR:` frame immediately invalidates the cached reading so stale sensor
   values are not posted after a reported fault.
 - Only a complete valid HTTP 200 `CMD:FAN=...,PUMP=...,FAN_MODE=AUTO|MANUAL,

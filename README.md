@@ -15,7 +15,7 @@ Bio-Sync is an IoT system that monitors temperature and humidity in a growing en
 ## 🏗️ Architecture
 
 ```
-┌─────────────────┐   HTTP (api_update.php)   ┌──────────────────┐
+┌─────────────────┐  HTTPS (api_update.php)   ┌──────────────────┐
 │  Arduino + ESP8266│ ───────────────────────▶ │  PHP web app      │
 │  DHT22 sensor     │ ◀─────────────────────── │  (XAMPP/Apache)   │
 │  Fan / Pump / LED │   CMD:FAN=n,PUMP=n       │  MariaDB          │
@@ -49,6 +49,7 @@ Three components work together:
 │   ├── knowledge.md          # Project behavior and component notes
 │   ├── SYSTEM_DIAGRAMS.md    # Architecture and data-flow diagrams
 │   └── reference/
+│       ├── Bio-Sync-Chapters-1-and-2.pdf # Capstone Chapters 1 and 2 (April 2026)
 │       └── Bio-Sync Project Overview.docx # Project manuscript / overview
 ├── biosync_ml/
 │   ├── train_models.py       # One-shot model trainer
@@ -79,7 +80,22 @@ Three components work together:
 3. Import `biosync_db.sql` via phpMyAdmin (`http://localhost/phpmyadmin`).
 4. Open `http://localhost/<folder-name>/login.php` and log in.
 
-> Database credentials are centralized in `config.php`. The XAMPP defaults are `root` with an empty password; use a dedicated database account outside local development.
+### Shared hosting setup
+
+For shared PHP/MySQL hosting, create a database in the provider panel and
+import `biosync_db.sql` using its database tool. Copy `config.local.php.example`
+to `config.local.php`, then enter the database host, database name, username,
+password, and a strong device token from the provider panel. Upload the PHP
+application files and `config.local.php` into the site's document root; do not
+upload development-only files such as tests, local firmware secrets, or model
+training data. `config.local.php` is ignored by Git and blocked from direct web
+requests by `.htaccess`. Keep an independent copy of the database export.
+
+The free InfinityFree plan supports PHP and MySQL but not the Flask prediction
+service. The dashboard's ML prediction requires a separately hosted Flask API
+or a hosting plan that confirms support for the project's Python dependencies.
+
+> XAMPP uses local `root` defaults unless `config.local.php` overrides them. Never reuse those defaults on a public host.
 
 ### 2. Machine learning service
 
@@ -108,11 +124,12 @@ both USB Serial Monitors use 115200 baud.
 
 See [firmware setup, power, upload and bench checks](firmware/README.md).
 See [architecture diagrams](docs/SYSTEM_DIAGRAMS.md), [project notes](docs/knowledge.md),
-and the [project overview manuscript](docs/reference/Bio-Sync%20Project%20Overview.docx).
+the [project overview manuscript](docs/reference/Bio-Sync%20Project%20Overview.docx),
+and [Bio-Sync Chapters 1 and 2](docs/reference/Bio-Sync-Chapters-1-and-2.pdf).
 Disconnect the Uno 5V-to-NodeMCU VIN jumper when powering both boards by USB.
-Keep Wi-Fi credentials and the matching Apache `BIOSYNC_DEVICE_TOKEN` in the
-ignored `firmware/esp12e/secrets.h`. Set the laptop Wi-Fi IP in the ESP bridge
-sketch. See [the wiring diagram](firmware/wiring_uno_esp12e_bridge.svg).
+Keep Wi-Fi credentials, the matching server `BIOSYNC_DEVICE_TOKEN`, the HTTPS
+API URL, and its trusted CA certificate in the ignored
+`firmware/esp12e/secrets.h`. See [the wiring diagram](firmware/wiring_uno_esp12e_bridge.svg).
 Both relays remain off until a valid server command arrives and turn off on a
 sensor fault or when the last valid command is 30 seconds old.
 ## ⚙️ Configuration
@@ -136,7 +153,7 @@ The dashboard stores the selected stage and its thresholds in `system_settings`;
 
 | Endpoint                    | Method | Purpose                                   |
 | --------------------------- | ------ | ----------------------------------------- |
-| `api_update.php`            | POST   | Form fields `temp`, `hum`; requires `X-Device-Token`; returns actuator state and active thresholds |
+| `api_update.php`            | HTTPS POST | Form fields `temp`, `hum`; requires `X-Device-Token`; returns actuator state and active thresholds |
 | `live_data.php`             | GET    | Live JSON feed (auth required)            |
 | `*.php` AJAX actions        | POST   | `ajax_action=` handlers per page          |
 
@@ -163,10 +180,10 @@ The dashboard stores the selected stage and its thresholds in `system_settings`;
 
 This project was built as an academic/prototype system. Before any real deployment:
 
-- Replace the hardcoded database credentials (duplicated across PHP files) with a shared config and a dedicated DB user.
-- Move the WiFi credentials and SMS API key out of source code (environment variables or a config file).
-- Serve over HTTPS and add CSRF protection to the AJAX endpoints.
-- Restrict `api_update.php` (e.g., shared secret or IP allow-list) so only the hardware can post readings.
+- Keep deployment database credentials in the ignored `config.local.php`; the tracked `config.php` contains only local defaults.
+- Keep Wi-Fi credentials in the ignored `firmware/esp12e/secrets.h` file. Configure a real Semaphore API key outside tracked source files; the PHP pages currently contain a placeholder.
+- Use HTTPS in deployment. Login and the page AJAX handlers currently validate session CSRF tokens, but HTTPS remains necessary to protect sessions and data in transit.
+- `api_update.php` validates the device token from the `BIOSYNC_DEVICE_TOKEN` environment variable or the ignored `config.local.php`; configure the same strong token in the firmware's ignored `secrets.h`.
 
 ## 📄 License
 

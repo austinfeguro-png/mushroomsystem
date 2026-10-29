@@ -2,14 +2,16 @@
 // No sensors or relays attach to this board. D6 = RX, D7 = TX.
 #include <ESP8266WiFi.h>
 #include <ESP8266HTTPClient.h>
+#include <time.h>
 #include <SoftwareSerial.h>
 #include "secrets.h"
 #include "protocol.h"
 #include "rx_guard.h"
 
-const char* SERVER_URL = "http://192.168.1.41/mushroomsystem/api_update.php";
+const char* SERVER_URL = BIOSYNC_SERVER_URL;
+BearSSL::X509List* serverTrustAnchor = nullptr;
 SoftwareSerial unoLink(D6, D7); // RX from Uno D11 divider, TX to Uno D10.
-const unsigned long POST_INTERVAL = 5000UL;
+const unsigned long POST_INTERVAL = 10000UL;
 const unsigned long READING_TIMEOUT = 8000UL;
 const unsigned long WIFI_RETRY = 15000UL;
 const unsigned long LOG_INTERVAL = 10UL * 60UL * 1000UL;
@@ -106,6 +108,35 @@ void beginWiFiAttempt() {
   if (WIFI_SSID[0] == '\0') Serial.println(F("[WiFi] SSID is empty; edit secrets.h and reupload."));
   WiFi.begin(WIFI_SSID, WIFI_PASS);
   lastWiFiTry = millis();
+}
+
+bool configureVerifiedHTTPS(BearSSL::WiFiClientSecure &client) {
+  if (strncmp(SERVER_URL, "https://", 8) != 0) {
+    Serial.println(F("[TLS] SERVER_URL must use https://; refusing unencrypted device traffic."));
+    return false;
+  }
+  if (strlen_P(BIOSYNC_ROOT_CA) == 0) {
+    Serial.println(F("[TLS] Add the server's trusted CA certificate to secrets.h."));
+    return false;
+  }
+
+  if (!serverTrustAnchor) {
+    serverTrustAnchor = new BearSSL::X509List(BIOSYNC_ROOT_CA);
+    if (!serverTrustAnchor) {
+      Serial.println(F("[TLS] Could not load the configured CA certificate."));
+      return false;
+    }
+  }
+
+  // BearSSL checks certificate validity dates, so wait for NTP time before
+  // opening a TLS connection. configTime() starts asynchronously in setup().
+  if (time(nullptr) < 1700000000) {
+    Serial.println(F("[TLS] Waiting for a valid clock before certificate verification."));
+    return false;
+  }
+
+  client.setTrustAnchors(serverTrustAnchor);
+  return true;
 }
 
 // HTTPClient decodes chunked replies into this fixed buffer. Oversize replies fail.
@@ -220,9 +251,10 @@ bool sendDataToServer(float temp, float hum, bool logReading) {
     Serial.println(F("Set BIOSYNC_DEVICE_TOKEN in secrets.h to match Apache."));
     return false;
   }
-  WiFiClient client;
+  BearSSL::WiFiClientSecure client;
   HTTPClient http;
-  http.setTimeout(1500);
+  http.setTimeout(8000);
+  if (!configureVerifiedHTTPS(client)) return false;
   if (!http.begin(client, SERVER_URL)) return false;
   http.addHeader("Content-Type", "application/x-www-form-urlencoded");
   http.addHeader("X-Device-Token", BIOSYNC_DEVICE_TOKEN);
@@ -265,9 +297,10 @@ bool sendDataToServer(float temp, float hum, bool logReading) {
 void sendOutputStateToServer() {
   if (!haveOutputState || millis() - lastOutputState >= READING_TIMEOUT
       || BIOSYNC_DEVICE_TOKEN[0] == '\0') return;
-  WiFiClient client;
+  BearSSL::WiFiClientSecure client;
   HTTPClient http;
-  http.setTimeout(1500);
+  http.setTimeout(8000);
+  if (!configureVerifiedHTTPS(client)) return;
   if (!http.begin(client, SERVER_URL)) return;
   http.addHeader("Content-Type", "application/x-www-form-urlencoded");
   http.addHeader("X-Device-Token", BIOSYNC_DEVICE_TOKEN);
@@ -297,6 +330,7 @@ void setup() {
   dhcpTimeoutHandler = WiFi.onStationModeDHCPTimeout(
       []() { dhcpTimeoutPending = true; });
   WiFi.mode(WIFI_STA);
+  configTime(0, 0, "pool.ntp.org", "time.nist.gov");
   beginWiFiAttempt();
   printWiFiStatus();
   Serial.println(F("BioSync NodeMCU bridge ready; D6 IRQ guard enabled; waiting for Uno readings."));

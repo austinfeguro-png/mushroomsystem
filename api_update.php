@@ -11,13 +11,16 @@
 // ==========================================================
 header('Content-Type: text/plain');
 
+require_once 'config.php';
+
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     http_response_code(405);
     echo "CMD:FAN=0,PUMP=0";
     exit;
 }
 
-$deviceToken = getenv('BIOSYNC_DEVICE_TOKEN') ?: '';
+$deviceToken = getenv('BIOSYNC_DEVICE_TOKEN')
+    ?: (defined('BIOSYNC_DEVICE_TOKEN') ? BIOSYNC_DEVICE_TOKEN : '');
 $providedToken = $_SERVER['HTTP_X_DEVICE_TOKEN'] ?? '';
 if ($deviceToken === '' || !hash_equals($deviceToken, (string)$providedToken)) {
     http_response_code(403);
@@ -25,7 +28,6 @@ if ($deviceToken === '' || !hash_equals($deviceToken, (string)$providedToken)) {
     exit;
 }
 
-require_once 'config.php';
 $pdo = getDB();
 
 function persistActuatorFeedback(PDO $pdo, int $fanState, int $pumpState): void {

@@ -81,7 +81,7 @@ sequenceDiagram
     participant SET as system_settings
 
     DHT->>ESP: read temp + humidity
-    ESP->>API: POST temp=27.4&hum=86.2 + X-Device-Token
+    ESP->>API: HTTPS POST temp=27.4&hum=86.2 + X-Device-Token
     API->>API: verify token + validate numeric ranges (-10..60 C, 0..100 %)
     alt missing token or invalid values
         API-->>ESP: CMD:FAN=0,PUMP=0 (safe state)

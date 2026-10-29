@@ -6,10 +6,17 @@
 // Include in every PHP file:  require_once 'config.php';
 // =============================================================
 
-define('DB_HOST', 'localhost');
-define('DB_NAME', 'biosync_db');
-define('DB_USER', 'root');
-define('DB_PASS', '');
+// Optional untracked hosting settings live in config.local.php. Keep database
+// credentials there rather than in this tracked file.
+$localConfig = __DIR__ . '/config.local.php';
+if (is_file($localConfig)) {
+    require_once $localConfig;
+}
+
+define('DB_HOST', defined('BIOSYNC_DB_HOST') ? BIOSYNC_DB_HOST : 'localhost');
+define('DB_NAME', defined('BIOSYNC_DB_NAME') ? BIOSYNC_DB_NAME : 'biosync_db');
+define('DB_USER', defined('BIOSYNC_DB_USER') ? BIOSYNC_DB_USER : 'root');
+define('DB_PASS', defined('BIOSYNC_DB_PASS') ? BIOSYNC_DB_PASS : '');
 
 /**
  * Returns a shared PDO instance (singleton pattern).
