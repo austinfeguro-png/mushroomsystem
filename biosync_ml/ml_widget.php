@@ -4,6 +4,8 @@
 // Included by dashboard.php — uses $temperature and $humidity
 // already set by dashboard.php
 // =============================================================
+require_once __DIR__ . '/../config.php';
+
 // Accept params from GET (AJAX) or dashboard PHP variables
 $ml_temp  = isset($_GET['temp'])  ? (float)$_GET['temp']  : (isset($temperature) ? (float)$temperature : 0.0);
 $ml_hum   = isset($_GET['hum'])   ? (float)$_GET['hum']   : (isset($humidity)    ? (float)$humidity    : 0.0);
@@ -16,13 +18,35 @@ $ml_stage_label = $stageLabelMap[$ml_stage] ?? ucfirst($ml_stage);
 $predData    = null;
 $ml_error    = null;
 
-$ctx = stream_context_create(['http' => ['timeout' => 2]]);
-$predRaw    = @file_get_contents("http://127.0.0.1:5000/predict?temp={$ml_temp}&hum={$ml_hum}&algo=" . urlencode($ml_algo) . "&stage=" . urlencode($ml_stage), false, $ctx);
+$ml_api_base = getenv('BIOSYNC_ML_API_URL')
+    ?: (defined('BIOSYNC_ML_API_URL') ? BIOSYNC_ML_API_URL : '');
+$ml_api_base = rtrim(trim($ml_api_base), '/');
 
-if ($predRaw === false) {
-    $ml_error = "ML Prediction API is offline. Open a terminal in the biosync_ml folder and run: python prediction_api.py";
+if ($ml_api_base === '') {
+    $ml_error = 'ML prediction service URL is not configured.';
 } else {
-    $predData = json_decode($predRaw, true);
+    $query = http_build_query([
+        'temp' => $ml_temp,
+        'hum' => $ml_hum,
+        'algo' => $ml_algo,
+        'stage' => $ml_stage,
+    ]);
+    $ctx = stream_context_create(['http' => [
+        'timeout' => 8,
+        'ignore_errors' => true,
+        'header' => "Accept: application/json\r\n",
+    ]]);
+    $predRaw = @file_get_contents($ml_api_base . '/predict?' . $query, false, $ctx);
+
+    if ($predRaw === false) {
+        $ml_error = 'ML prediction service is unreachable or waking up. Please refresh shortly.';
+    } else {
+        $predData = json_decode($predRaw, true);
+        if (!is_array($predData) || isset($predData['error'])) {
+            $predData = null;
+            $ml_error = 'ML prediction service returned an error. Check the hosted service status.';
+        }
+    }
 }
 
 $palette = [

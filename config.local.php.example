@@ -1,8 +1,0 @@
-<?php
-// Copy to config.local.php and fill in values from the hosting control panel.
-// Keep config.local.php private and never commit it.
-define('BIOSYNC_DB_HOST', 'HOSTNAME_FROM_HOSTING_PANEL');
-define('BIOSYNC_DB_NAME', 'DATABASE_NAME_FROM_HOSTING_PANEL');
-define('BIOSYNC_DB_USER', 'DATABASE_USERNAME_FROM_HOSTING_PANEL');
-define('BIOSYNC_DB_PASS', 'DATABASE_PASSWORD_FROM_HOSTING_PANEL');
-define('BIOSYNC_DEVICE_TOKEN', 'A_LONG_RANDOM_DEVICE_TOKEN');

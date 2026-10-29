@@ -92,8 +92,10 @@ training data. `config.local.php` is ignored by Git and blocked from direct web
 requests by `.htaccess`. Keep an independent copy of the database export.
 
 The free InfinityFree plan supports PHP and MySQL but not the Flask prediction
-service. The dashboard's ML prediction requires a separately hosted Flask API
-or a hosting plan that confirms support for the project's Python dependencies.
+service. For a separate Flask host, define `BIOSYNC_ML_API_URL` in the private
+`config.local.php` as the service base URL (for example, `https://service.example`);
+the PHP widget appends `/predict`. Free Render services may sleep while idle, so
+the first prediction request can time out while the service wakes.
 
 > XAMPP uses local `root` defaults unless `config.local.php` overrides them. Never reuse those defaults on a public host.
 
