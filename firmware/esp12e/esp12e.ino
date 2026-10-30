@@ -267,6 +267,27 @@ bool sendDataToServer(float temp, float hum, bool logReading) {
   Serial.print(F("[HTTP] Starting POST; free heap=")); Serial.println(ESP.getFreeHeap());
   int code = http.POST(body);
   Serial.print(F("POST -> HTTP ")); Serial.println(code);
+  if (code < 0) {
+    Serial.print(F("[HTTP] Client error: "));
+    Serial.println(HTTPClient::errorToString(code));
+    char tlsError[96] = {0};
+    int tlsErrorCode = client.getLastSSLError(tlsError, sizeof(tlsError));
+    if (tlsErrorCode != 0) {
+      Serial.print(F("[TLS] BearSSL error "));
+      Serial.print(tlsErrorCode);
+      Serial.print(F(": "));
+      Serial.println(tlsError);
+      time_t deviceTime = time(nullptr);
+      struct tm *utcTime = gmtime(&deviceTime);
+      if (utcTime) {
+        char clockText[32];
+        if (strftime(clockText, sizeof(clockText), "%Y-%m-%d %H:%M:%S UTC", utcTime) > 0) {
+          Serial.print(F("[TLS] Device clock: "));
+          Serial.println(clockText);
+        }
+      }
+    }
+  }
   ReplyBuffer reply;
   bool ok = false;
   if (code == HTTP_CODE_OK) {
