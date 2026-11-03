@@ -31,22 +31,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax_action'])) {
         $id       = $_POST['user_id'];
         $fullName = trim($_POST['full_name']);
         $username = trim($_POST['username']);
-        $phone    = trim($_POST['phone']);
         $role     = in_array($_POST['role'], ['user','admin']) ? $_POST['role'] : 'user';
         $status   = in_array($_POST['status'], ['Active','Inactive']) ? $_POST['status'] : 'Active';
         $password = $_POST['password'];
 
         if (empty($id)) {
             if (empty($password)) { echo json_encode(['success'=>false,'message'=>'Password required for new users.']); exit(); }
-            $stmt = $pdo->prepare("INSERT INTO users (full_name, username, phone, role, status, password_hash) VALUES (:name,:username,:phone,:role,:status,:pass)");
-            $ok = $stmt->execute(['name'=>$fullName,'username'=>$username,'phone'=>$phone,'role'=>$role,'status'=>$status,'pass'=>password_hash($password,PASSWORD_DEFAULT)]);
+            $stmt = $pdo->prepare("INSERT INTO users (full_name, username, role, status, password_hash) VALUES (:name,:username,:role,:status,:pass)");
+            $ok = $stmt->execute(['name'=>$fullName,'username'=>$username,'role'=>$role,'status'=>$status,'pass'=>password_hash($password,PASSWORD_DEFAULT)]);
         } else {
             if (!empty($password)) {
-                $stmt = $pdo->prepare("UPDATE users SET full_name=:name,username=:username,phone=:phone,role=:role,status=:status,password_hash=:pass WHERE id=:id");
-                $ok = $stmt->execute(['name'=>$fullName,'username'=>$username,'phone'=>$phone,'role'=>$role,'status'=>$status,'pass'=>password_hash($password,PASSWORD_DEFAULT),'id'=>$id]);
+                $stmt = $pdo->prepare("UPDATE users SET full_name=:name,username=:username,role=:role,status=:status,password_hash=:pass WHERE id=:id");
+                $ok = $stmt->execute(['name'=>$fullName,'username'=>$username,'role'=>$role,'status'=>$status,'pass'=>password_hash($password,PASSWORD_DEFAULT),'id'=>$id]);
             } else {
-                $stmt = $pdo->prepare("UPDATE users SET full_name=:name,username=:username,phone=:phone,role=:role,status=:status WHERE id=:id");
-                $ok = $stmt->execute(['name'=>$fullName,'username'=>$username,'phone'=>$phone,'role'=>$role,'status'=>$status,'id'=>$id]);
+                $stmt = $pdo->prepare("UPDATE users SET full_name=:name,username=:username,role=:role,status=:status WHERE id=:id");
+                $ok = $stmt->execute(['name'=>$fullName,'username'=>$username,'role'=>$role,'status'=>$status,'id'=>$id]);
             }
         }
         echo json_encode(['success'=>$ok,'message'=>$ok?'Saved successfully.':'DB error.']);
@@ -109,7 +108,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax_action'])) {
     }
 }
 
-$stmt = $pdo->query("SELECT id,full_name,username,phone,role,status FROM users ORDER BY id ASC");
+$stmt = $pdo->query("SELECT id,full_name,username,role,status FROM users ORDER BY id ASC");
 $users = $stmt->fetchAll();
 $settingsStmt = $pdo->query("SELECT setting_key,setting_value FROM system_settings");
 $settings = $settingsStmt->fetchAll(PDO::FETCH_KEY_PAIR);
@@ -387,7 +386,6 @@ $stage       = $settings['current_stage'] ?? 'colonization';
                                 <th style="width:52px">Avatar</th>
                                 <th>Full Name</th>
                                 <th>Username</th>
-                                <th>Phone</th>
                                 <th>Role</th>
                                 <th>Status</th>
                                 <th style="text-align:right">Actions</th>
@@ -399,7 +397,6 @@ $stage       = $settings['current_stage'] ?? 'colonization';
                                 <td><img src="https://ui-avatars.com/api/?name=<?php echo urlencode($u['full_name']); ?>&background=random" class="table-avatar"></td>
                                 <td style="font-weight:600"><?php echo htmlspecialchars($u['full_name']); ?></td>
                                 <td><?php echo htmlspecialchars($u['username']); ?></td>
-                                <td style="color:var(--text-muted)"><?php echo htmlspecialchars($u['phone']??'—'); ?></td>
                                 <td style="text-transform:capitalize"><?php echo htmlspecialchars($u['role']); ?></td>
                                 <td>
                                     <?php if(strtolower($u['status'])==='active'): ?>
@@ -411,7 +408,7 @@ $stage       = $settings['current_stage'] ?? 'colonization';
                                 <td>
                                     <div class="action-btns">
                                         <button class="btn-icon" title="Edit"
-                                            onclick="openEditModal(<?php echo (int)$u['id']; ?>,<?php echo jsArg($u['full_name']); ?>,<?php echo jsArg($u['username']); ?>,<?php echo jsArg($u['phone'] ?? ''); ?>,<?php echo jsArg($u['role']); ?>,<?php echo jsArg($u['status']); ?>)">
+                                            onclick="openEditModal(<?php echo (int)$u['id']; ?>,<?php echo jsArg($u['full_name']); ?>,<?php echo jsArg($u['username']); ?>,<?php echo jsArg($u['role']); ?>,<?php echo jsArg($u['status']); ?>)">
                                             <i class="fa-solid fa-pen"></i>
                                         </button>
                                         <button class="btn-icon del" title="Delete"
@@ -441,7 +438,6 @@ $stage       = $settings['current_stage'] ?? 'colonization';
             <input type="hidden" id="userId">
             <div class="form-group"><label>Full Name</label><input type="text" id="fullName" class="field" placeholder="e.g. jv cute" required></div>
             <div class="form-group"><label>Username</label><input type="text" id="userUsername" class="field" placeholder="e.g. austinechan" required></div>
-            <div class="form-group"><label>Phone (For Alerts)</label><input type="text" id="userPhone" class="field" placeholder="+63 9xx xxx xxxx"></div>
             <div class="form-row">
                 <div class="form-group">
                     <label>Role</label>
@@ -580,18 +576,16 @@ function openAddModal() {
     document.getElementById('userId').value = '';
     document.getElementById('fullName').value = '';
     document.getElementById('userUsername').value = '';
-    document.getElementById('userPhone').value = '';
     document.getElementById('userRole').value = 'user';
     document.getElementById('userStatus').value = 'Active';
     document.getElementById('userPassword').value = '';
     document.getElementById('userModal').classList.add('open');
 }
-function openEditModal(id, name, username, phone, role, status) {
+function openEditModal(id, name, username, role, status) {
     document.getElementById('modalTitle').textContent = 'Edit User';
     document.getElementById('userId').value = id;
     document.getElementById('fullName').value = name;
     document.getElementById('userUsername').value = username;
-    document.getElementById('userPhone').value = phone;
     document.getElementById('userRole').value = role;
     document.getElementById('userStatus').value = status;
     document.getElementById('userPassword').value = '';
@@ -610,7 +604,6 @@ function saveUser() {
     const id       = document.getElementById('userId').value;
     const name     = document.getElementById('fullName').value.trim();
     const username = document.getElementById('userUsername').value.trim();
-    const phone    = document.getElementById('userPhone').value.trim();
     const role     = document.getElementById('userRole').value;
     const status   = document.getElementById('userStatus').value;
     const password = document.getElementById('userPassword').value;
@@ -622,7 +615,7 @@ function saveUser() {
     fd.append('csrf_token', document.querySelector('meta[name="csrf-token"]').content);
     fd.append('ajax_action','save_user');
     fd.append('user_id',id); fd.append('full_name',name); fd.append('username',username);
-    fd.append('phone',phone); fd.append('role',role); fd.append('status',status); fd.append('password',password);
+    fd.append('role',role); fd.append('status',status); fd.append('password',password);
 
     fetch('usermanagement.php', { method:'POST', body:fd })
         .then(r => r.json())

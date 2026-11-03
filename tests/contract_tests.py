@@ -8,7 +8,7 @@ allowed to fail (defects you intentionally defer); when a fix lands,
 remove the entry so the check becomes a hard PASS/FAIL.
 
 KNOWN_BUGS is currently EMPTY — every defect from the inspection report
-has been fixed (SMS cooldown DB-backed, trainer dedup, stage thresholds
+has been fixed (trainer dedup, stage thresholds
 on historical + notifications pages, config.php consolidation, logout.php,
 index.php, post() helper, #alertBanner, low-temp alerts).
 Run from project root:  python tests/contract_tests.py
@@ -69,8 +69,7 @@ js_block = dash[dash.find("function updateLiveData"):]
 for key in ["temperature", "humidity", "fanState", "pumpState", "tempUnit",
             "tempAbove", "tempBelow", "humAbove", "humBelow", "stage",
             "daysPassed", "expectedDays", "pendingReminder", "activeAlgo",
-            "chartLabels", "tempHistory", "humHistory", "notifications",
-            "notifiedString", "dispatchStatus"]:
+            "chartLabels", "tempHistory", "humHistory", "notifications"]:
     check(f"live_data produces + dashboard consumes '{key}'",
           key in live and f"d.{key}" in js_block)
 
@@ -315,12 +314,12 @@ check("settings table has PRIMARY KEY (ON DUPLICATE KEY UPDATE works)",
       "ADD PRIMARY KEY (`setting_key`)" in sql)
 
 # -------------------------------------------------------------
-print("=== 8. Alerting & SMS consistency ===")
-check("SMS cooldown has a single DB-backed source of truth",
-      "last_sms_sent" in live and
-      re.search(r"(INSERT INTO system_settings|UPDATE system_settings)[^;]*last_sms_sent", dash + hist) is not None,
-      "live_data.php reads system_settings.last_sms_sent but dashboard/historical only write "
-      "$_SESSION['last_sms_sent'] -> DB key never written, 'Ready to Send' always shown")
+print("=== 8. Alerting ===")
+check("SMS provider and cooldown code are removed",
+      not re.search(r"sendSMS|semaphore\.co|last_sms_sent|notifiedString|dispatchStatus", dash + live + hist + notif, re.I))
+check("environmental alerts remain available without SMS",
+      all("$alertTriggered" in src and "Auto-systems started." in src
+          for src in (dash, hist, notif)))
 check("dashboard.php low-temperature alert check",
       "$temperature < $MIN_TEMP" in dash,
       "api_update alerts on low temp but dashboard alert banner ignores it (fan-only rule)")
@@ -374,7 +373,7 @@ check("notificationspage.php uses stage-based thresholds",
 print("=== 12. Historical background refresh ===")
 refresh = hist[hist.index('// SILENT REFRESH'):]
 check("history timer never navigates or reloads", "setInterval(() => refreshHistory(), 5000)" in refresh and "location.reload" not in refresh)
-check("history JSON exits before SMS dispatch", hist.index("'rows' => $historicalData") < hist.index('// 6. ALERT SYSTEM & SMS DISPATCH') and "header('Cache-Control: no-store')" in hist)
+check("history JSON exits before environmental alert rendering", hist.index("'rows' => $historicalData") < hist.index('// 6. ENVIRONMENTAL ALERT SYSTEM') and "header('Cache-Control: no-store')" in hist)
 check("history reapplies search and sort without toggling direction", "sortTable(activeSortColumn, false)" in refresh and "searchTable();" in refresh)
 check("history preserves viewport and table scroll", "window.scrollTo(scrollX, scrollY)" in refresh and "wrap.scrollLeft = left" in refresh and "wrap.scrollTop = top" in refresh)
 check("history ignores stale or interrupted background requests", "historyRequest !== controller" in refresh and "historyRequest.abort()" in refresh and "historyBusy()" in refresh)

@@ -48,7 +48,6 @@ if ($isAjax) {
     // ── Update profile ──────────────────────────────────
     if ($_POST['ajax_action'] === 'update_profile') {
         $fullName = trim($_POST['full_name'] ?? '');
-        $phone    = trim($_POST['phone']     ?? '');
 
         if ($fullName === '') {
             echo json_encode(['success' => false, 'error' => 'Full name is required.']);
@@ -58,14 +57,9 @@ if ($isAjax) {
             echo json_encode(['success' => false, 'error' => 'Full name must be 100 characters or fewer.']);
             exit;
         }
-        if ($phone !== '' && !preg_match('/^\+?[0-9][0-9\s\-().]{5,19}$/', $phone)) {
-            echo json_encode(['success' => false, 'error' => 'Enter a valid phone number, e.g. +639265028114.']);
-            exit;
-        }
-
         try {
-            $pdo->prepare("UPDATE users SET full_name=:name, phone=:phone WHERE id=:id")
-                ->execute(['name' => $fullName, 'phone' => $phone, 'id' => $userId]);
+            $pdo->prepare("UPDATE users SET full_name=:name WHERE id=:id")
+                ->execute(['name' => $fullName, 'id' => $userId]);
 
             $_SESSION['user_name'] = $fullName;
             echo json_encode(['success' => true, 'full_name' => $fullName]);
@@ -187,7 +181,7 @@ if ($isAjax) {
 // ==========================================
 // 4. LOAD CURRENT USER DATA
 // ==========================================
-$stmt = $pdo->prepare("SELECT full_name, username, phone, role, status, avatar_url FROM users WHERE id = :id");
+$stmt = $pdo->prepare("SELECT full_name, username, role, status, avatar_url FROM users WHERE id = :id");
 $stmt->execute(['id' => $userId]);
 $user = $stmt->fetch();
 
@@ -553,12 +547,6 @@ $hasCustomAvatar = !empty($user['avatar_url']) && avatarUrl($user['avatar_url'],
                            disabled title="Username cannot be changed">
                 </div>
                 <div class="form-group">
-                    <label for="phoneInput">Phone Number</label>
-                    <input type="tel" inputmode="tel" autocomplete="tel" maxlength="20" name="phone" id="phoneInput"
-                           value="<?php echo htmlspecialchars($user['phone'] ?? ''); ?>"
-                           placeholder="e.g. +639265028114">
-                </div>
-                <div class="form-group">
                     <label>Account Status</label>
                     <input type="text" value="<?php echo htmlspecialchars($user['status']); ?>" disabled>
                 </div>
@@ -733,7 +721,6 @@ document.getElementById('profileForm').addEventListener('submit', function(e) {
     post({
         ajax_action: 'update_profile',
         full_name:   document.getElementById('fullNameInput').value,
-        phone:       document.getElementById('phoneInput').value,
     }).then(data => {
         btn.textContent = 'Save Changes';
         btn.disabled    = false;

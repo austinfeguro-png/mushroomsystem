@@ -1,7 +1,6 @@
 <?php
 // =============================================================
 // BIO-SYNC LIVE DATA ENDPOINT  |  live_data.php
-// Fixed: SMS cooldown uses DB instead of PHP session (Bug 7)
 // Fixed: Consolidated device queries — 5 queries reduced to 3 (Issue 3)
 // Fixed: DB credentials centralized in config.php (getDB)
 // =============================================================
@@ -92,30 +91,6 @@ $chartLabels = array_column($tempLogs, 'label');
 $tempHistory = array_map('floatval', array_column($tempLogs, 'recorded_value'));
 $humHistory  = array_map('floatval', array_column($humLogs,  'recorded_value'));
 
-// ── SMS dispatch list ───────────────────────────────────────
-$smsUsers = $pdo->query(
-    "SELECT full_name, phone FROM users
-     WHERE status='active' AND phone IS NOT NULL AND phone != ''"
-);
-$parts = [];
-foreach ($smsUsers->fetchAll(PDO::FETCH_ASSOC) as $u) {
-    $parts[] = htmlspecialchars($u['full_name'])
-             . ' (' . htmlspecialchars($u['phone']) . ')';
-}
-$notifiedString = count($parts) > 0 ? implode(' &bull; ', $parts) : '';
-
-// FIX (Bug 7): SMS cooldown from DB — not PHP session
-$cooldown     = 900;
-$lastSentStmt = $pdo->query(
-    "SELECT setting_value FROM system_settings WHERE setting_key='last_sms_sent'"
-);
-$lastSentVal  = $lastSentStmt->fetchColumn();
-$lastSent     = $lastSentVal ? (int)$lastSentVal : 0;
-$onCooldown   = (time() - $lastSent) <= $cooldown;
-$dispatchStatus = $onCooldown
-    ? "<span style='color:#d97706;'>(On Cooldown - Sent recently)</span>"
-    : "<span style='color:#16a34a;'>(Ready to Send)</span>";
-
 // ── Recent notifications ────────────────────────────────────
 $nq     = $pdo->query(
     "SELECT title, description, message, type, icon_class, is_read, created_at
@@ -154,8 +129,6 @@ echo json_encode([
     'tempHistory'    => $tempHistory,
     'humHistory'     => $humHistory,
     'notifications'  => $notifs,
-    'notifiedString' => $notifiedString,
-    'dispatchStatus' => $dispatchStatus,
     'MAX_TEMP'       => $MAX_TEMP,
     'MIN_TEMP'       => $MIN_TEMP,
     'MIN_HUM'        => $MIN_HUM,

@@ -21,41 +21,6 @@ $isAdmin = isset($_SESSION['user_role']) && strtolower($_SESSION['user_role']) =
 require_once 'config.php';
 $pdo = getDB();
 
-// ==========================================
-// 3. SMS API FUNCTION (SEMAPHORE - PHILIPPINES)
-// ==========================================
-function sendSMS($to, $message) {
-    $apikey = "YOUR_SEMAPHORE_API_KEY_HERE";
-
-    $ch = curl_init();
-    curl_setopt($ch, CURLOPT_URL, "https://api.semaphore.co/api/v4/messages");
-    curl_setopt($ch, CURLOPT_POST, 1);
-    curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query([
-        'apikey'  => $apikey,
-        'number'  => $to,
-        'message' => $message,
-    ]));
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    curl_setopt($ch, CURLOPT_TIMEOUT, 8);
-    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 5);
-
-    $response  = curl_exec($ch);
-    $curlError = curl_error($ch);
-    $httpCode  = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    curl_close($ch);
-
-    if ($curlError) {
-        error_log("SMS curl error for {$to}: {$curlError}");
-        return false;
-    }
-    if ($httpCode < 200 || $httpCode >= 300) {
-        error_log("SMS API HTTP {$httpCode} for {$to}: {$response}");
-        return false;
-    }
-    return true;
-}
-
-// ==========================================
 // 4. HANDLE AJAX POST REQUESTS
 // ==========================================
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax_action'])) {
@@ -233,7 +198,7 @@ if ($filterSensor === 'all') {
     }
 }
 
-// Read-only refresh returns before SMS dispatch and cooldown writes.
+// Read-only refresh returns before the non-refresh page response.
 if (($_GET['history_refresh'] ?? '') === '1') {
     header('Content-Type: application/json');
     header('Cache-Control: no-store');
@@ -250,13 +215,11 @@ if (($_GET['history_refresh'] ?? '') === '1') {
 }
 
 // ==========================================
-// 6. ALERT SYSTEM & SMS DISPATCH
-// $cooldownSeconds defined first so the alert branch can reference it
+// 6. ENVIRONMENTAL ALERT SYSTEM
 // ==========================================
-$cooldownSeconds    = 900;
-$smsStatusMessage   = "";
 $alertTriggered     = false;
 $abnormalConditions = [];
+$conditionString    = '';
 
 // Read latest sensor values from sensor_logs (same pattern as dashboard)
 $tempStmt    = $pdo->query("SELECT recorded_value FROM sensor_logs WHERE device_id = (SELECT id FROM devices WHERE device_name = 'Temperature Node 1' LIMIT 1) ORDER BY recorded_at DESC LIMIT 1");
@@ -280,45 +243,6 @@ if ($liveHum < $MIN_HUM || $liveHum > $MAX_HUM) {
 
 if ($alertTriggered) {
     $conditionString  = implode(" & ", $abnormalConditions);
-    $realSmsMessage   = "BIO-SYNC ALERT: Critical limits exceeded! {$conditionString}. Auto-systems started.";
-    $alertUsersStmt   = $pdo->query("SELECT full_name, phone FROM users WHERE status = 'active' AND phone IS NOT NULL AND phone != ''");
-    $alertUsers       = $alertUsersStmt->fetchAll(PDO::FETCH_ASSOC);
-    $notifiedNumbers  = [];
-    foreach ($alertUsers as $u) {
-        $notifiedNumbers[] = htmlspecialchars($u['full_name']) . " (" . htmlspecialchars($u['phone']) . ")";
-    }
-
-    // FIX: DB-backed SMS cooldown (shared with live_data.php + dashboard.php)
-    $lastSentStmt    = $pdo->query("SELECT setting_value FROM system_settings WHERE setting_key='last_sms_sent'");
-    $lastSmsSentTime = $lastSentStmt ? (int)$lastSentStmt->fetchColumn() : 0;
-    $smsSentJustNow  = false;
-
-    if ((time() - $lastSmsSentTime) > $cooldownSeconds && count($alertUsers) > 0) {
-        foreach ($alertUsers as $u) {
-            if (!sendSMS($u['phone'], $realSmsMessage)) {
-                error_log("SMS failed for user: " . $u['full_name']);
-            }
-        }
-        $upd = $pdo->prepare("INSERT INTO system_settings (setting_key, setting_value) VALUES ('last_sms_sent', :val) ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)");
-        $upd->execute(['val' => (string)time()]);
-        $smsSentJustNow = true;
-    }
-
-    $notifiedString = count($notifiedNumbers) > 0
-        ? implode(" &bull; ", $notifiedNumbers)
-        : "No phone numbers registered.";
-
-    $dispatchStatus = $smsSentJustNow
-        ? "<span class='sms-sent'>SMS Sent Just Now</span>"
-        : "<span class='sms-cooldown'>On Cooldown — Sent recently</span>";
-
-    $smsStatusMessage = "
-        <strong>ALERT:</strong> {$conditionString}. Auto-systems started.
-        <div class='sms-dispatch'>
-            <i class='fa-solid fa-tower-cell'></i>
-            <span><strong>SMS Dispatch:</strong> {$notifiedString} {$dispatchStatus}</span>
-        </div>
-    ";
 }
 ?>
 <!DOCTYPE html>
@@ -589,20 +513,6 @@ if ($alertTriggered) {
         }
         body.dark .alert-banner { color: #fca5a5; }
         .alert-banner i { font-size: 18px; padding-top: 1px; flex-shrink: 0; }
-
-        .sms-dispatch {
-            margin-top: 8px;
-            font-size: 12px;
-            background: rgba(220,38,38,0.1);
-            border: 1px solid #fca5a5;
-            border-radius: 6px;
-            padding: 8px 10px;
-            display: flex;
-            gap: 8px;
-            align-items: flex-start;
-        }
-        .sms-sent     { color: #16a34a; font-weight: 600; }
-        .sms-cooldown { color: #d97706; font-weight: 600; }
 
         @keyframes alertPulse {
             0%   { box-shadow: 0 0 0 0 rgba(220,38,38,0.3); }
@@ -1056,7 +966,7 @@ if ($alertTriggered) {
             <?php if ($alertTriggered): ?>
             <div class="alert-banner">
                 <i class="fa-solid fa-triangle-exclamation"></i>
-                <div><?php echo $smsStatusMessage; ?></div>
+                <div><strong>ALERT:</strong> <?php echo $conditionString; ?>. Auto-systems started.</div>
             </div>
             <?php endif; ?>
 

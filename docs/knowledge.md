@@ -13,7 +13,7 @@ Import `biosync_db.sql` into MariaDB. `devices`, `sensor_logs`, `notifications`,
 
 ## Local Setup and Checks
 
-Run Apache and MariaDB through XAMPP, import the schema, and open `login.php`. Database settings are in `config.php`. Configure Apache's `BIOSYNC_DEVICE_TOKEN` environment variable and the same token in local `secrets.h` before expecting device ingest to work. Keep WiFi and SMS credentials out of tracked files; rotate any credential that was committed previously.
+Run Apache and MariaDB through XAMPP, import the schema, and open `login.php`. Database settings are in `config.php`. Configure Apache's `BIOSYNC_DEVICE_TOKEN` environment variable and the same token in local `secrets.h` before expecting device ingest to work. Keep WiFi credentials out of tracked files; rotate any credential that was committed previously.
 
 Run `bash tests/run_tests.sh` for PHP syntax checks, in-memory Python syntax checks, and static contract checks. `bash tests/run_tests.sh --live` makes read-only checks against running services, including verifying that unauthenticated sensor writes are rejected. For model training, run `python train_models.py` from `biosync_ml/` after collecting at least 50 paired readings, then start `python prediction_api.py` from that directory.
 

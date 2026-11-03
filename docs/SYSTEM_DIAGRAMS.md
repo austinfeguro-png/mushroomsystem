@@ -34,7 +34,7 @@ flowchart TB
 
     DHT --> ESP
     ESP -->|"Authenticated POST temp + hum (every cycle)"| API
-    API -->|"reads current_stage + thresholds<br/>reads/writes last_sms_sent"| DB
+    API -->|"reads current_stage + thresholds"| DB
     API -->|"sensor_logs (value, timestamp, stage)"| DB
     API -->|"devices.current_state<br/>Temp/Hum/Fan/Pump"| DB
     API -->|"notifications (alert, stage_reminder)"| DB
@@ -46,7 +46,7 @@ flowchart TB
     DB -.-> CFG
     DASH -->|"poll every 5s"| LIVE
     LIVE --> DB
-    DASH -->|"stage switch, Extend/Advance,<br/>settings, SMS send"| DB
+    DASH -->|"stage switch, Extend/Advance,<br/>settings"| DB
     DASH -->|"includes"| MLW
     MLW -->|"/predict + /metrics (2s timeout)"| FLASK
     OTHER --> DB
@@ -125,21 +125,13 @@ sequenceDiagram
         U->>LIVE: fetch live_data.php
         LIVE->>DB: settings + devices + sensor_logs + notifications
         DB-->>LIVE: rows
-        LIVE->>DB: read system_settings.last_sms_sent
-        LIVE-->>U: JSON (values, fan/pump, stage, alerts, SMS status)
+        LIVE-->>U: JSON (values, fan/pump, stage, alerts)
         U->>U: repaint cards, LEDs, banner, stage progress
     end
 
     opt admin changes stage
         U->>DASH: POST save_settings (stage whitelist)
         DASH->>DB: upsert current_stage, stage_started_at, expected_days
-    end
-
-    opt alert breach + SMS due
-        U->>DASH: page load during alert
-        DASH->>DB: read last_sms_sent (DB-backed cooldown 900 s)
-        DASH->>DASH: sendSMS() via Semaphore API
-        DASH->>DB: write last_sms_sent = time()
     end
 
     note over U,FLASK: ML widget calls Flask at render time

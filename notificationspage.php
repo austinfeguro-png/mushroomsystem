@@ -149,7 +149,7 @@ $humidity = (float)$humStmt->fetchColumn();
 
 $alertTriggered     = false;
 $abnormalConditions = [];
-$smsStatusMessage   = '';
+$conditionString    = '';
 
 if ($temperature > $MAX_TEMP) {
     $abnormalConditions[] = "Temperature is {$temperature}°{$TEMP_UNIT} (Max: {$MAX_TEMP}°{$TEMP_UNIT})";
@@ -167,20 +167,6 @@ if ($humidity < $MIN_HUM || $humidity > $MAX_HUM) {
 
 if ($alertTriggered) {
     $conditionString  = implode(" &amp; ", $abnormalConditions);
-    $alertUsersStmt   = $pdo->query("SELECT full_name, phone FROM users WHERE status = 'active' AND phone IS NOT NULL AND phone != ''");
-    $alertUsers       = $alertUsersStmt->fetchAll(PDO::FETCH_ASSOC);
-    $notifiedNumbers  = [];
-    foreach ($alertUsers as $u) {
-        $notifiedNumbers[] = htmlspecialchars($u['full_name']) . " (" . htmlspecialchars($u['phone']) . ")";
-    }
-    $notifiedString = count($notifiedNumbers) > 0 ? implode(" &bull; ", $notifiedNumbers) : "No phone numbers registered.";
-    $smsStatusMessage = "
-        <strong>ALERT:</strong> {$conditionString}. Auto-systems started.
-        <div class='sms-dispatch'>
-            <i class='fa-solid fa-tower-cell'></i>
-            <span><strong>SMS Dispatch:</strong> {$notifiedString}</span>
-        </div>
-    ";
 }
 
 // ==========================================
@@ -422,13 +408,6 @@ foreach ($notifications as $n) {
         }
         body.dark .alert-banner { color: #fca5a5; }
         .alert-banner i { font-size: 18px; padding-top: 1px; flex-shrink: 0; }
-        .sms-dispatch {
-            margin-top: 8px; font-size: 12px;
-            background: rgba(220,38,38,0.1);
-            border: 1px solid #fca5a5;
-            border-radius: 6px; padding: 8px 10px;
-            display: flex; gap: 8px; align-items: flex-start;
-        }
         @keyframes alertPulse {
             0%   { box-shadow: 0 0 0 0 rgba(220,38,38,0.3); }
             70%  { box-shadow: 0 0 0 8px rgba(220,38,38,0); }
@@ -884,7 +863,7 @@ foreach ($notifications as $n) {
             <!-- ALERT BANNER -->
             <div class="alert-banner" id="alertBanner" style="display:<?php echo $alertTriggered ? 'flex' : 'none'; ?>;">
                 <i class="fa-solid fa-triangle-exclamation" style="flex-shrink:0;"></i>
-                <div id="alertBannerText" style="flex:1;"><?php echo $smsStatusMessage; ?></div>
+                <div id="alertBannerText" style="flex:1;"><strong>ALERT:</strong> <?php echo $conditionString; ?>. Auto-systems started.</div>
             </div>
 
             <!-- STATS BAR -->
@@ -1360,14 +1339,9 @@ function updateNotifPage() {
                     if (d.tempAbove) msgs.push('Temperature is ' + d.temperature + '°' + d.tempUnit + ' (Limit: ' + d.MAX_TEMP + '°' + d.tempUnit + ')');
                     if (d.humAbove)  msgs.push('Humidity is HIGH: ' + d.humidity + '% (Max: ' + d.MAX_HUM + '%)');
                     if (d.humBelow)  msgs.push('Humidity is LOW: '  + d.humidity + '% (Min: ' + d.MIN_HUM + '%)');
-                    const smsHtml = d.notifiedString
-                        ? '<div style="font-size:13px;color:#b91c1c;background:rgba(239,68,68,0.15);padding:10px;border-radius:6px;border:1px solid #fca5a5;margin-top:8px;">' +
-                          '<i class="fa-solid fa-tower-cell" style="margin-right:6px;"></i>' +
-                          '<strong>SMS Dispatch:</strong> ' + d.notifiedString + ' ' + (d.dispatchStatus || '') + '</div>'
-                        : '';
                     if (bannerText) bannerText.innerHTML =
                         '<div style="width:100%;"><div style="font-size:15px;margin-bottom:4px;">' +
-                        '<strong>ALERT:</strong> ' + msgs.join(' & ') + '. Auto-systems started.</div>' + smsHtml + '</div>';
+                        '<strong>ALERT:</strong> ' + msgs.join(' & ') + '. Auto-systems started.</div></div>';
                     banner.style.display = 'flex';
                 } else {
                     banner.style.display = 'none';

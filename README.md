@@ -1,12 +1,11 @@
 # 🌱 Bio-Sync -MAIN — Smart Greenhouse Monitoring & Automation
 
-Bio-Sync is an IoT system that monitors temperature and humidity in a growing environment, automatically controls a ventilation fan and water pump, sends SMS alerts to staff, and visualizes everything on a live web dashboard — with a machine-learning service that classifies growing conditions.
+Bio-Sync is an IoT system that monitors temperature and humidity in a growing environment, automatically controls a ventilation fan and water pump, displays environmental alerts on a live web dashboard, and uses a machine-learning service to classify growing conditions.
 
 ## ✨ Features
 
 - **Live monitoring** — local temperature/humidity checks and control every 3 seconds; sensor history is saved every 10 minutes, with the dashboard refreshing every 5 seconds
 - **Automatic control** — fan and pump switch on/off based on configurable thresholds (with hardware-side overrides)
-- **SMS alerts** — notifications via the Semaphore API with a 15-minute cooldown
 - **User management** — admin/user roles, bcrypt-hashed passwords, account activation/deactivation
 - **Notifications center** — in-app alerts with read/unread state
 - **Historical data** — sensor logs stored in MariaDB with history charts
@@ -30,7 +29,7 @@ Bio-Sync is an IoT system that monitors temperature and humidity in a growing en
 Three components work together:
 
 1. **Uno firmware** (`firmware/uno/`) — reads the DHT22, controls relays and LEDs, and sends readings over serial to the ESP-12E. **ESP bridge** (`firmware/esp12e/`) — forwards readings to the PHP API and passes validated commands back to the Uno.
-2. **PHP web app** (repo root) — dashboard, authentication, user management, notifications, SMS dispatch, and the hardware ingest endpoint.
+2. **PHP web app** (repo root) — dashboard, authentication, user management, notifications, and the hardware ingest endpoint.
 3. **Python ML service** (`biosync_ml/`) — trains classifiers from logged sensor data and exposes a prediction API the dashboard queries.
 
 ## 📁 Repository Layout
@@ -38,7 +37,7 @@ Three components work together:
 ```
 ├── api_update.php            # Hardware ingest endpoint (Arduino → server)
 ├── live_data.php             # JSON feed polled by the dashboard every 5 s
-├── dashboard.php             # Main dashboard + AJAX handlers + SMS
+├── dashboard.php             # Main dashboard + AJAX handlers
 ├── login.php                 # Authentication
 ├── profile.php               # User profile management
 ├── usermanagement.php        # Admin-only user CRUD
@@ -165,7 +164,6 @@ Thresholds live in the `system_settings` database table and can be tuned from th
 
 The dashboard stores the selected stage and its thresholds in `system_settings`; the hardware API returns the active thresholds to the firmware so its local safety overrides stay in sync.
 
-- **SMS**: paste your Semaphore API key into `sendSMS()` in `dashboard.php` / `historicaldatapage.php`. All active users with a phone number on file receive alerts.
 - **Arduino overrides**: the firmware enforces the same thresholds locally, so automatic overrides use the most recent valid thresholds; both relays turn off after 30 seconds without a valid server command.
 
 ## 🔌 API Reference
@@ -195,14 +193,14 @@ The dashboard stores the selected stage and its thresholds in `system_settings`;
 | `system_settings` | Thresholds and system configuration        |
 | `system_controls` | Manual fan/pump control states             |
 | `notifications`   | In-app alerts                              |
-| `users`           | Accounts, roles, contact numbers           |
+| `users`           | Accounts and roles                         |
 
 ## ⚠️ Security Notes
 
 This project was built as an academic/prototype system. Before any real deployment:
 
 - Keep deployment database credentials in the ignored `config.local.php`; the tracked `config.php` contains only local defaults.
-- Keep Wi-Fi credentials in the ignored `firmware/esp12e/secrets.h` file. Configure a real Semaphore API key outside tracked source files; the PHP pages currently contain a placeholder.
+- Keep Wi-Fi credentials in the ignored `firmware/esp12e/secrets.h` file.
 - Use HTTPS in deployment. Login and the page AJAX handlers currently validate session CSRF tokens, but HTTPS remains necessary to protect sessions and data in transit.
 - `api_update.php` validates the device token from the `BIOSYNC_DEVICE_TOKEN` environment variable or the ignored `config.local.php`; configure the same strong token in the firmware's ignored `secrets.h`.
 
