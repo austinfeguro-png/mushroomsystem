@@ -1,0 +1,15 @@
+.git
+.git/**
+.agents/
+.freebuff/
+config.local.php
+config.local.example.php
+certs/
+biosync_db.sql
+docs/
+tests/
+firmware/
+biosync_ml/*.py
+biosync_ml/*.pkl
+biosync_ml/*.json
+biosync_ml/requirements.txt

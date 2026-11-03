@@ -83,7 +83,7 @@ Three components work together:
 ### Shared hosting setup
 
 For shared PHP/MySQL hosting, create a database in the provider panel and
-import `biosync_db.sql` using its database tool. Copy `config.local.php.example`
+import `biosync_db.sql` using its database tool. Copy `config.local.example.php`
 to `config.local.php`, then enter the database host, database name, username,
 password, and a strong device token from the provider panel. Upload the PHP
 application files and `config.local.php` into the site's document root; do not
@@ -100,6 +100,21 @@ and database to another supported setup. For a separate Flask host, define
 (for example, `https://service.example`); the PHP widget appends `/predict`.
 Free Render services may sleep while idle, so the first prediction request can
 time out while the service wakes.
+
+### Render deployment for the PHP web app
+
+The repository root includes a `Dockerfile` for Render's Docker web-service runtime.
+Push the project to a Git provider, create a Render Web Service from that repository,
+select **Docker**, and leave the Dockerfile path as `Dockerfile`. The container
+listens on Render's default web-service port, `10000`.
+
+Set these service environment variables in Render: `BIOSYNC_DB_HOST`,
+`BIOSYNC_DB_PORT`, `BIOSYNC_DB_NAME`, `BIOSYNC_DB_USER`, and `BIOSYNC_DB_PASS`.
+Add the Aiven CA certificate as a Render secret file named `ca.pem`, then set
+`BIOSYNC_DB_SSL_CA` to `/etc/secrets/ca.pem`. Also set `BIOSYNC_DEVICE_TOKEN`
+to the token configured for the ESP device and `BIOSYNC_ML_API_URL` to the base
+URL of the deployed Flask prediction service. Do not upload `config.local.php` or
+the local `certs/` folder; the Docker build excludes them.
 
 > XAMPP uses local `root` defaults unless `config.local.php` overrides them. Never reuse those defaults on a public host.
 

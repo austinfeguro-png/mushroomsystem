@@ -1,3 +1,4 @@
 /firmware/esp12e/secrets.h
 /config.local.php
+/certs/
 /biosync_ml/__pycache__/
