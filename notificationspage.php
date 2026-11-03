@@ -958,7 +958,6 @@ foreach ($notifications as $n) {
                         };
                         $faIcon    = !empty($n['icon_class']) ? htmlspecialchars($n['icon_class']) : 'fa-bell';
                         $itemClass = 'notif-item type-' . $type . ($isUnread ? ' unread' : '');
-                        $timeStr   = date('M d, g:i A', strtotime($n['created_at']));
                     ?>
                     <div class="<?php echo $itemClass; ?>" data-id="<?php echo (int)$n['id']; ?>" data-type="<?php echo $type; ?>" data-read="<?php echo $isUnread ? '0' : '1'; ?>">
                         <div class="notif-icon <?php echo $iconClass; ?>">
@@ -972,7 +971,7 @@ foreach ($notifications as $n) {
                                     <span class="type-badge <?php echo $badgeClass; ?>"><?php echo $type; ?></span>
                                 </div>
                                 <div class="notif-meta">
-                                    <span class="notif-time"><?php echo $timeStr; ?></span>
+                                    <time class="notif-time" data-utc="<?php echo htmlspecialchars($n['created_at'], ENT_QUOTES, 'UTF-8'); ?>"></time>
                                 </div>
                             </div>
                             <div class="notif-desc"><?php echo htmlspecialchars($n['description']); ?></div>
@@ -1080,6 +1079,24 @@ foreach ($notifications as $n) {
 </div>
 
 <script>
+// Notification DATETIME values are stored as UTC; render them in the viewer's local timezone.
+function formatUtcNotificationTime(value, includeDate) {
+    if (!value) return '';
+    const normalized = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(value)
+        ? value
+        : value.replace(' ', 'T') + 'Z';
+    const date = new Date(normalized);
+    if (Number.isNaN(date.getTime())) return '';
+    const options = includeDate
+        ? { month: 'short', day: '2-digit', hour: 'numeric', minute: '2-digit' }
+        : { hour: 'numeric', minute: '2-digit' };
+    return new Intl.DateTimeFormat(undefined, options).format(date);
+}
+
+document.querySelectorAll('[data-utc].notif-time').forEach((element) => {
+    element.textContent = formatUtcNotificationTime(element.dataset.utc, true);
+});
+
 // ================================================
 // SIDEBAR (MOBILE HAMBURGER)
 // ================================================

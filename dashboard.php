@@ -1395,7 +1395,7 @@ if ($alertTriggered) {
                             <div>
                                 <div class="notif-title"><?php echo htmlspecialchars($n['title']); ?></div>
                                 <div class="notif-desc"><?php echo htmlspecialchars($n['description']); ?></div>
-                                <div class="notif-time"><?php echo date('h:i A', strtotime($n['created_at'])); ?></div>
+                                <time class="notif-time" data-utc="<?php echo htmlspecialchars($n['created_at'], ENT_QUOTES, 'UTF-8'); ?>"></time>
                             </div>
                         </div>
                         <?php endforeach; ?>
@@ -1603,6 +1603,22 @@ if ($alertTriggered) {
 </div>
 
 <script>
+// Notification DATETIME values are stored as UTC; render them in the viewer's local timezone.
+function formatUtcNotificationTime(value) {
+    if (!value) return '';
+    const normalized = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(value)
+        ? value
+        : value.replace(' ', 'T') + 'Z';
+    const date = new Date(normalized);
+    return Number.isNaN(date.getTime())
+        ? ''
+        : new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(date);
+}
+
+document.querySelectorAll('[data-utc].notif-time').forEach((element) => {
+    element.textContent = formatUtcNotificationTime(element.dataset.utc);
+});
+
 // ================================================
 // SIDEBAR (MOBILE HAMBURGER)
 // ================================================
@@ -2098,7 +2114,7 @@ function updateLiveData() {
                         const cls     = 'notif-item' + (isAlert ? ' alert' : isInfo ? ' info' : '');
                         const iconClr = isAlert ? 'color:var(--danger)' : (isInfo ? 'color:var(--primary)' : 'color:var(--text-light)');
                         const icon    = n.icon_class || 'fa-bell';
-                        const d_time  = n.created_at ? new Date(n.created_at.replace(' ','T')).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'}) : '';
+                        const d_time  = formatUtcNotificationTime(n.created_at);
                         return '<div class="' + cls + '">' +
                             '<i class="fa-solid ' + icon + '" style="' + iconClr + '"></i>' +
                             '<div>' +
