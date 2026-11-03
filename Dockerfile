@@ -5,6 +5,7 @@ FROM php:8.2-apache
 RUN apt-get update \
     && apt-get install -y --no-install-recommends libcurl4-openssl-dev \
     && docker-php-ext-install pdo_mysql curl \
+    && (getent group 1000 >/dev/null || groupadd --gid 1000 rendersecrets) \
     && usermod -a -G 1000 www-data \
     && rm -rf /var/lib/apt/lists/*
 
