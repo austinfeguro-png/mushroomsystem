@@ -15,6 +15,7 @@ RUN sed -i 's/^Listen 80$/Listen 10000/' /etc/apache2/ports.conf \
 
 COPY .htaccess /var/www/html/.htaccess
 COPY config.php index.php login.php logout.php dashboard.php live_data.php \
+    presence.js user_presence.php \
     historicaldatapage.php notificationspage.php profile.php usermanagement.php \
     api_update.php /var/www/html/
 COPY biosync_ml/ml_widget.php /var/www/html/biosync_ml/ml_widget.php
