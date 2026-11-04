@@ -1,7 +1,7 @@
 #pragma once
 #include <Arduino.h>
 
-// ESP8266-specific GPIO12 guard. No pins, baud rates, or Uno code change.
+// ESP8266-specific GPIO12 guard (NodeMCU D6 RX). No Uno code change.
 namespace RxGuard {
 constexpr uint8_t PIN = 12;
 constexpr uint32_t WINDOW_US = 10000;

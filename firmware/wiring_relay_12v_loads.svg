@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="700" viewBox="0 0 1200 700" role="img" aria-labelledby="title desc">
+  <title id="title">One 12 V adapter wired through two relay channels</title>
+  <desc id="desc">One 12 V adapter supplies the positive side through K1 COM and NO to the fan, and through K2 COM and NO to the pump. Both actuator negatives return to the adapter negative. NC contacts are unused.</desc>
+  <defs>
+    <style>
+      text{font-family:Arial,Helvetica,sans-serif;fill:#17212b}.title{font-size:30px;font-weight:700}.sub{font-size:17px;fill:#4b5b68}.head{font-size:20px;font-weight:700}.label{font-size:16px}.small{font-size:14px}.bold{font-weight:700}.wireP{fill:none;stroke:#d94b45;stroke-width:5;stroke-linecap:round;stroke-linejoin:round}.wireN{fill:none;stroke:#273746;stroke-width:5;stroke-linecap:round;stroke-linejoin:round}.panel{fill:#fff;stroke:#cbd5df;stroke-width:2;rx:18}.relay{fill:#edf3fb;stroke:#54708a;stroke-width:2;rx:14}.supply{fill:#fff5df;stroke:#b18a35;stroke-width:2;rx:14}.load{fill:#eef8f0;stroke:#45815b;stroke-width:2;rx:14}.terminal{fill:#fff;stroke:#253748;stroke-width:3}.warn{fill:#fff8e8;stroke:#e2c46e;stroke-width:1.5;rx:10}
+    </style>
+  </defs>
+  <rect width="1200" height="700" fill="#f6f8fa"/>
+  <text x="600" y="48" text-anchor="middle" class="title">ONE 12 V ADAPTER · TWO RELAYED ACTUATORS</text>
+  <text x="600" y="78" text-anchor="middle" class="sub">K1 switches the fan; K2 switches the pump. COM–NO keeps each load off when its relay is off.</text>
+
+  <rect x="35" y="105" width="1130" height="500" class="panel"/>
+  <rect x="65" y="250" width="200" height="140" class="supply"/>
+  <text x="165" y="302" text-anchor="middle" class="head">12 V adapter</text>
+  <text x="165" y="330" text-anchor="middle" class="label">one supply for both</text>
+  <circle cx="265" cy="275" r="8" class="terminal"/><circle cx="265" cy="355" r="8" class="terminal"/>
+  <text x="245" y="281" text-anchor="end" class="label bold">+</text>
+  <text x="245" y="361" text-anchor="end" class="label bold">−</text>
+
+  <!-- Shared positive feed branches to the two COM contacts. -->
+  <path d="M265 275 H325 V180 H415 M325 180 V430 H415" class="wireP"/>
+  <circle cx="325" cy="180" r="6" fill="#d94b45"/><circle cx="325" cy="430" r="6" fill="#d94b45"/>
+  <text x="278" y="263" class="small bold" fill="#b13330">+12 V shared feed</text>
+
+  <!-- K1 contact set and fan. -->
+  <text x="415" y="145" text-anchor="middle" class="label bold">COM</text>
+  <text x="600" y="145" text-anchor="middle" class="label bold">NO</text>
+  <text x="785" y="145" text-anchor="middle" class="label bold">NC</text>
+  <rect x="370" y="165" width="460" height="72" class="relay"/>
+  <text x="600" y="208" text-anchor="middle" class="head">K1 · FAN</text>
+  <circle cx="415" cy="180" r="8" class="terminal"/><circle cx="600" cy="180" r="8" class="terminal"/><circle cx="785" cy="180" r="8" class="terminal"/>
+  <path d="M600 180 H870 V240 H930" class="wireP"/>
+  <text x="675" y="169" class="small bold" fill="#b13330">NO → fan +</text>
+  <text x="800" y="160" class="small" fill="#687680">NC unused</text>
+  <rect x="930" y="200" width="190" height="80" class="load"/>
+  <text x="1025" y="232" text-anchor="middle" class="head">Fan</text>
+  <text x="950" y="263" class="small bold">+</text><text x="1087" y="263" class="small bold">−</text>
+  <circle cx="955" cy="240" r="7" class="terminal"/><circle cx="1095" cy="240" r="7" class="terminal"/>
+
+  <!-- K2 contact set and pump. -->
+  <text x="415" y="395" text-anchor="middle" class="label bold">COM</text>
+  <text x="600" y="395" text-anchor="middle" class="label bold">NO</text>
+  <text x="785" y="395" text-anchor="middle" class="label bold">NC</text>
+  <rect x="370" y="415" width="460" height="72" class="relay"/>
+  <text x="600" y="458" text-anchor="middle" class="head">K2 · PUMP</text>
+  <circle cx="415" cy="430" r="8" class="terminal"/><circle cx="600" cy="430" r="8" class="terminal"/><circle cx="785" cy="430" r="8" class="terminal"/>
+  <path d="M600 430 H870 V490 H930" class="wireP"/>
+  <text x="675" y="419" class="small bold" fill="#b13330">NO → pump +</text>
+  <text x="800" y="410" class="small" fill="#687680">NC unused</text>
+  <rect x="930" y="450" width="190" height="80" class="load"/>
+  <text x="1025" y="482" text-anchor="middle" class="head">Pump</text>
+  <text x="950" y="513" class="small bold">+</text><text x="1087" y="513" class="small bold">−</text>
+  <circle cx="955" cy="490" r="7" class="terminal"/><circle cx="1095" cy="490" r="7" class="terminal"/>
+
+  <!-- Both actuator negatives return to the adapter's single negative output. -->
+  <path d="M1095 240 H1135 V555 H265 V355 M1095 490 H1105 V555" class="wireN"/>
+  <circle cx="1105" cy="555" r="6" fill="#273746"/>
+  <text x="580" y="548" text-anchor="middle" class="small bold">Both actuator − leads return to adapter −</text>
+
+  <rect x="55" y="625" width="1090" height="55" class="warn"/>
+  <text x="600" y="649" text-anchor="middle" class="small bold">Power off while wiring. Follow the relay board’s printed COM / NO / NC labels; terminal order varies.</text>
+  <text x="600" y="669" text-anchor="middle" class="small">Use an adapter rated for both actuators. Keep 12 V away from Arduino pins.</text>
+</svg>

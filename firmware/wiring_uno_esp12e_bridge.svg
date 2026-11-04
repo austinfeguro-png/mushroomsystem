@@ -55,13 +55,13 @@
   <text x="690" y="405" text-anchor="middle" class="boardTitle">ARDUINO UNO</text>
   <text x="690" y="428" text-anchor="middle" class="small muted">sensor + relay controller</text>
   <circle cx="560" cy="370" r="7" class="terminal"/><text x="560" y="458" text-anchor="middle" class="label bold">5V</text>
-  <circle cx="700" cy="370" r="7" class="terminal"/><text x="700" y="458" text-anchor="middle" class="label bold">D2</text>
+  <circle cx="700" cy="370" r="7" class="terminal"/><text x="700" y="458" text-anchor="middle" class="label bold">D3</text>
   <circle cx="840" cy="370" r="7" class="terminal"/><text x="840" y="458" text-anchor="middle" class="label bold">GND</text>
   <circle cx="460" cy="490" r="7" class="terminal"/><text x="485" y="496" class="label bold">D4 · FAN</text>
   <circle cx="460" cy="545" r="7" class="terminal"/><text x="485" y="551" class="label bold">D5 · PUMP</text>
   <circle cx="460" cy="605" r="7" class="terminal"/><text x="485" y="611" class="label bold">5V</text>
   <circle cx="460" cy="665" r="7" class="terminal"/><text x="485" y="671" class="label bold">GND</text>
-  <circle cx="920" cy="490" r="7" class="terminal"/><text x="895" y="478" text-anchor="end" class="label bold">D10 RX</text>
+  <circle cx="920" cy="490" r="7" class="terminal"/><text x="895" y="478" text-anchor="end" class="label bold">D12 RX</text>
   <circle cx="920" cy="550" r="7" class="terminal"/><text x="895" y="538" text-anchor="end" class="label bold">D11 TX</text>
   <circle cx="920" cy="710" r="7" class="terminal"/><text x="895" y="704" text-anchor="end" class="small bold">GND</text>
   <circle cx="600" cy="730" r="7" class="terminal"/><text x="600" y="755" text-anchor="middle" class="small bold">D8</text>
@@ -122,7 +122,7 @@
   <!-- Flash mode -->
   <rect x="35" y="955" width="1530" height="265" class="panel"/>
   <text x="70" y="996" class="section">TEMPORARY ESP FLASH WIRING</text>
-  <text x="70" y="1023" class="subtitle">Disconnect the running D10 / D11 serial wires while uploading.</text>
+  <text x="70" y="1023" class="subtitle">Disconnect the running D12 / D11 serial wires while uploading.</text>
   <path d="M570 1100 H760" class="wire blue"/>
   <path d="M570 1150 H610" class="wire blue"/>
   <rect x="610" y="1138" width="50" height="24" class="divider"/>

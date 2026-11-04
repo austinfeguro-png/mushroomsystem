@@ -10,7 +10,7 @@
 
 const char* SERVER_URL = BIOSYNC_SERVER_URL;
 BearSSL::X509List* serverTrustAnchor = nullptr;
-SoftwareSerial unoLink(D6, D7); // RX from Uno D11 divider, TX to Uno D10.
+SoftwareSerial unoLink(D6, D7); // RX from Uno D11 divider, TX to Uno D12.
 const unsigned long POST_INTERVAL = 10000UL;
 const unsigned long READING_TIMEOUT = 8000UL;
 const unsigned long WIFI_RETRY = 15000UL;
@@ -21,6 +21,7 @@ BioSync::OutputState outputState = {false, false};
 bool haveReading = false, haveOutputState = false, firstLogPending = true;
 unsigned long lastReading = 0, lastOutputState = 0, lastPost = 0;
 unsigned long lastStatePost = 0, lastWiFiTry = 0, lastLoggedAt = 0;
+unsigned long lastFailSafe = 0;
 
 // Retain event subscriptions. Callbacks only record codes; print from loop().
 WiFiEventHandler disconnectedHandler, associatedHandler, dhcpTimeoutHandler;
@@ -151,7 +152,9 @@ public:
     if (!remaining) overflow = true; // Full/unknown-length replies fail closed.
     return (int)remaining;
   }
-  bool outputCanTimeout() override { return false; }
+  // No "override": this virtual only exists in newer ESP8266 cores, and
+  // omitting the keyword compiles on both old and new cores.
+  bool outputCanTimeout() { return false; }
   size_t write(const uint8_t *buffer, size_t size) override {
     size_t copied = 0;
     while (copied < size && write(buffer[copied])) ++copied;
@@ -168,6 +171,14 @@ public:
   int peek() override { return -1; }
   void flush() override {}
 };
+
+// Tell the Uno to drop its outputs. Used on every path where no valid
+// server command is available.
+void sendFailSafe(const __FlashStringHelper *why) {
+  unoLink.println(F("ERR:SERVER"));
+  lastFailSafe = millis();
+  Serial.println(why);
+}
 
 void readUno() {
   if (RxGuard::tripped() && !receiverPaused) {
@@ -249,13 +260,20 @@ bool freshReading() {
 bool sendDataToServer(float temp, float hum, bool logReading) {
   if (BIOSYNC_DEVICE_TOKEN[0] == '\0') {
     Serial.println(F("Set BIOSYNC_DEVICE_TOKEN in secrets.h to match Apache."));
+    sendFailSafe(F("No device token; Uno outputs off"));
     return false;
   }
   BearSSL::WiFiClientSecure client;
   HTTPClient http;
   http.setTimeout(8000);
-  if (!configureVerifiedHTTPS(client)) return false;
-  if (!http.begin(client, SERVER_URL)) return false;
+  if (!configureVerifiedHTTPS(client)) {
+    sendFailSafe(F("TLS not ready; Uno outputs off"));
+    return false;
+  }
+  if (!http.begin(client, SERVER_URL)) {
+    sendFailSafe(F("HTTP begin failed; Uno outputs off"));
+    return false;
+  }
   http.addHeader("Content-Type", "application/x-www-form-urlencoded");
   http.addHeader("X-Device-Token", BIOSYNC_DEVICE_TOKEN);
   String body = "temp=" + String(temp, 1) + "&hum=" + String(hum, 1)
@@ -314,11 +332,12 @@ bool sendDataToServer(float temp, float hum, bool logReading) {
   http.end();
   readUno(); // Discard a response if the Uno reported a sensor fault meanwhile.
   if (ok && freshReading()) {
+    Serial.print(F("[LINK TX D7 -> Uno D12] "));
+    Serial.println(reply.data);
     unoLink.println(reply.data);
     Serial.println(F("Validated server command forwarded to Uno"));
   } else {
-    unoLink.println(F("ERR:SERVER"));
-    Serial.println(F("No valid command; Uno outputs off"));
+    sendFailSafe(F("No valid command; Uno outputs off"));
   }
   return ok; // Successful POST is logged even if the serial link became stale.
 }
@@ -370,6 +389,10 @@ void loop() {
   reportWiFiEvents();
   unsigned long now = millis();
   if (WiFi.status() != WL_CONNECTED) {
+    // No server link: keep telling the Uno to hold its outputs off.
+    if (now - lastFailSafe >= POST_INTERVAL) {
+      sendFailSafe(F("[WiFi] Offline; Uno outputs off"));
+    }
     if (now - lastWiFiTry >= WIFI_RETRY) {
       Serial.println(F("[WiFi] Still offline after 15 s; retrying Wi-Fi association."));
       printWiFiStatus();

@@ -5,12 +5,12 @@ Upload **both** sketches, one to each board. The sketches use a newline-delimite
 
 | Connection | Arduino Uno | NodeMCU ESP-12E |
 | --- | --- | --- |
-| DHT22 DATA | D2 | — |
+| DHT22 DATA | D3 | — |
 | Fan relay IN1 | D4 | — |
 | Pump relay IN2 | D5 | — |
 | Blue fan LED through 220 ohms | D8 | — |
 | Yellow pump LED through 220 ohms | D9 | — |
-| Serial Uno receives | D10 (RX) | D7 / GPIO13 (TX) |
+| Serial Uno receives | D12 (RX) | D7 / GPIO13 (TX) |
 | Serial Uno transmits | D11 (TX), through divider | D6 / GPIO12 (RX) |
 | Ground | GND | G / GND |
 
@@ -22,8 +22,8 @@ active-LOW relay inputs; verify the actual module before connecting loads.
 ## Initial full-system test with indicator LEDs
 
 Use both boards, the 3-pin DHT22, breadboard, and the existing firmware pin
-map. Connect the DHT22 VCC to Uno 5V, DATA to Uno D2, and GND to Uno GND;
-follow the module's printed labels because pin order varies. Connect Uno D10
+map. Connect the DHT22 VCC to Uno 5V, DATA to Uno D3, and GND to Uno GND;
+follow the module's printed labels because pin order varies. Connect Uno D12
 (RX) to NodeMCU D7 (TX). Connect Uno D11 (TX) to NodeMCU D6 (RX) through a
 divider: D11 → 1k ohm → junction → D6, with 2k ohm from the junction to GND.
 Power the Uno and NodeMCU from separate USB ports and connect their GND pins;
@@ -41,7 +41,7 @@ bare 12V relay coil must not connect directly to an Uno pin. See
 
 Use the Uno TX divider: D11 → 1k ohm → junction → NodeMCU D6; junction →
 2k ohm → ground. Never connect a 5V Uno TX signal directly to an ESP GPIO.
-NodeMCU D7 connects directly to Uno D10. Keep a common ground.
+NodeMCU D7 connects directly to Uno D12. Keep a common ground.
 
 For USB programming/debugging, disconnect the **Uno 5V → NodeMCU VIN** jumper
 and power each board from its own USB cable. Do not reconnect that jumper while

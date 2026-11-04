@@ -191,8 +191,8 @@ check("Uno updates all stage thresholds from a complete validated server record"
       all(f'",{key}="' in protocol for key in ["MIN_TEMP", "MAX_TEMP", "MIN_HUM", "MAX_HUM"])
       and "command = candidate" in uno and "command.maxHum" in uno)
 check("Uno pin map matches two-board wiring",
-      all(token in uno for token in ["DHT_PIN = 2", "FAN_RELAY = 4", "PUMP_RELAY = 5",
-                                    "FAN_LED = 8", "PUMP_LED = 9", "nodeLink(10, 11)"])
+      all(token in uno for token in ["DHT_PIN = 3", "FAN_RELAY = 4", "PUMP_RELAY = 5",
+                                    "FAN_LED = 8", "PUMP_LED = 9", "nodeLink(12, 11)"])
       and "unoLink(D6, D7)" in sketch)
 check("Uno owns pump deadline and stale-command fail-safe independently of networking",
       "COMMAND_TIMEOUT = 30000UL" in uno and "PUMP_MAX_RUN_MS = 30000UL" in uno

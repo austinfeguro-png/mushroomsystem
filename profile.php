@@ -848,5 +848,6 @@ function confirmLogout(e) {
     if (confirm('Are you sure you want to log out?')) location.href = 'logout.php';
 }
 </script>
+<script src="presence.js" defer></script>
 </body>
 </html>

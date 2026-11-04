@@ -685,5 +685,6 @@ document.addEventListener('keydown', function (e) {
     if (m) m.classList.remove('open');
 });
 </script>
+<script src="presence.js" defer></script>
 </body>
 </html>

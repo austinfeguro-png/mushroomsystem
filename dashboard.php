@@ -235,7 +235,14 @@ if (count($tempLogs) > 0) {
     $humHistory  = [0,0,0,0,0,0,0];
 }
 
-$userQuery  = $pdo->prepare("SELECT full_name, status FROM users WHERE id != :id LIMIT 3");
+$userQuery  = $pdo->prepare("SELECT u.id, u.full_name,
+    CASE WHEN MAX(p.last_seen_at) >= UTC_TIMESTAMP() - INTERVAL 75 SECOND THEN 1 ELSE 0 END AS is_online
+    FROM users u
+    LEFT JOIN user_presence p ON p.user_id = u.id
+    WHERE u.id != :id
+    GROUP BY u.id, u.full_name
+    ORDER BY is_online DESC, u.full_name ASC
+    LIMIT 3");
 $userQuery->execute(['id' => $userId]);
 $otherUsers = $userQuery->fetchAll(PDO::FETCH_ASSOC);
 
@@ -1348,28 +1355,28 @@ if ($alertTriggered) {
 
                 <div class="card">
                     <div class="card-head">
-                        <h3 class="card-title">Active Users</h3>
+                        <h3 class="card-title">User Presence</h3>
                         <a href="usermanagement.php" class="card-link">View All</a>
                     </div>
 
-                    <div class="user-row">
+                    <div class="user-row" data-presence-user="<?php echo (int)$userId; ?>">
                         <div class="user-row-left">
                             <img src="https://ui-avatars.com/api/?name=<?php echo urlencode($userName); ?>&background=16a34a&color=fff" alt="">
                             <div>
                                 <div class="user-row-name"><?php echo htmlspecialchars($userName); ?> <span style="font-weight:400;color:var(--text-light)">(You)</span></div>
-                                <div class="status-on">Online</div>
+                                <div class="status-on" data-presence-label>Online</div>
                             </div>
                         </div>
                     </div>
 
                     <?php foreach ($otherUsers as $ou): ?>
-                    <div class="user-row">
+                    <div class="user-row" data-presence-user="<?php echo (int)$ou['id']; ?>">
                         <div class="user-row-left">
                             <img src="https://ui-avatars.com/api/?name=<?php echo urlencode($ou['full_name']); ?>&background=random" alt="">
                             <div>
                                 <div class="user-row-name"><?php echo htmlspecialchars($ou['full_name']); ?></div>
-                                <div class="<?php echo strtolower($ou['status']) === 'online' ? 'status-on' : 'status-off'; ?>">
-                                    <?php echo htmlspecialchars($ou['status']); ?>
+                                <div class="<?php echo (int)$ou['is_online'] === 1 ? 'status-on' : 'status-off'; ?>" data-presence-label>
+                                    <?php echo (int)$ou['is_online'] === 1 ? 'Online' : 'Offline'; ?>
                                 </div>
                             </div>
                         </div>
@@ -1937,6 +1944,16 @@ function updateLiveData() {
         .then(d => {
             if (sequence !== liveDataSequence) return;
 
+            const presenceById = new Map((d.userPresence || []).map(user => [String(user.id), Boolean(Number(user.isOnline))]));
+            document.querySelectorAll('[data-presence-user]').forEach(row => {
+                const online = presenceById.get(row.dataset.presenceUser) === true;
+                const label = row.querySelector('[data-presence-label]');
+                if (label) {
+                    label.textContent = online ? 'Online' : 'Offline';
+                    label.className = online ? 'status-on' : 'status-off';
+                }
+            });
+
             // ── Stat cards ────────────────────────────────
             const statCards = document.querySelectorAll('.stat-value');
             if (statCards[0]) {
@@ -2104,5 +2121,6 @@ document.addEventListener('keydown', function (e) {
     if (m) m.classList.remove('open');
 });
 </script>
+<script src="presence.js" defer></script>
 </body>
 </html>

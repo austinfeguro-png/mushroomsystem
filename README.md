@@ -186,6 +186,12 @@ The dashboard stores the selected stage and its thresholds in `system_settings`;
 
 ## 📊 Database Schema
 
+For an existing installation, run `user_presence_migration.sql` once in the
+`biosync_db` database before opening the updated dashboard. It adds the table
+used to show whether each account has a recent signed-in session. Presence is
+refreshed every 20 seconds and becomes offline after 75 seconds without a
+heartbeat; logging out removes that browser session immediately.
+
 | Table             | Purpose                                    |
 | ----------------- | ------------------------------------------ |
 | `devices`         | Registered devices and their current state |
@@ -194,6 +200,7 @@ The dashboard stores the selected stage and its thresholds in `system_settings`;
 | `system_controls` | Manual fan/pump control states             |
 | `notifications`   | In-app alerts                              |
 | `users`           | Accounts and roles                         |
+| `user_presence`   | Recent signed-in browser sessions          |
 
 ## ⚠️ Security Notes
 

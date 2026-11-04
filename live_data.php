@@ -65,6 +65,20 @@ $actuatorReportedAt = (int)($settings['actuator_state_reported_at'] ?? 0);
 $actuatorFeedbackAge = $actuatorReportedAt > 0 ? max(0, time() - $actuatorReportedAt) : null;
 $actuatorFeedbackFresh = $actuatorFeedbackAge !== null && $actuatorFeedbackAge <= 15;
 
+$presenceStmt = $pdo->prepare(
+    "SELECT u.id,
+            CASE WHEN u.id = :current_user OR MAX(p.last_seen_at) >= UTC_TIMESTAMP() - INTERVAL 75 SECOND
+                 THEN 1 ELSE 0 END AS is_online
+     FROM users u
+     LEFT JOIN user_presence p ON p.user_id = u.id
+     GROUP BY u.id
+     ORDER BY u.id"
+);
+$presenceStmt->execute(['current_user' => (int)$_SESSION['user_id']]);
+$userPresence = array_map(static function (array $row): array {
+    return ['id' => (int)$row['id'], 'isOnline' => (bool)$row['is_online']];
+}, $presenceStmt->fetchAll(PDO::FETCH_ASSOC));
+
 // ── Chart history ───────────────────────────────────────────
 $tempDeviceId = $pdo->query(
     "SELECT id FROM devices WHERE device_name='Temperature Node 1' LIMIT 1"
@@ -129,6 +143,7 @@ echo json_encode([
     'tempHistory'    => $tempHistory,
     'humHistory'     => $humHistory,
     'notifications'  => $notifs,
+    'userPresence'   => $userPresence,
     'MAX_TEMP'       => $MAX_TEMP,
     'MIN_TEMP'       => $MIN_TEMP,
     'MIN_HUM'        => $MIN_HUM,

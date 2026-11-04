@@ -6,6 +6,17 @@
 // ==========================================
 session_start();
 
+// Remove only this browser session's presence row. Other sessions belonging
+// to the same account remain online.
+require_once __DIR__ . '/config.php';
+try {
+    $pdo = getDB();
+    $presenceDelete = $pdo->prepare('DELETE FROM user_presence WHERE session_hash = :session_hash');
+    $presenceDelete->execute(['session_hash' => hash('sha256', session_id())]);
+} catch (Throwable $e) {
+    error_log('BioSync presence cleanup failed during logout: ' . $e->getMessage());
+}
+
 // Clear all session variables
 $_SESSION = [];
 
