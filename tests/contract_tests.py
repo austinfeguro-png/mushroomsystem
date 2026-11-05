@@ -90,6 +90,16 @@ check("dashboard.php toggle JS references existing element IDs",
            "fanFeedback", "pumpFeedback", "stageReminderBanner", "mlWidgetCard"]))
 check("dashboard.php save_settings whitelists the 3 stages",
       "['colonization','pinning','fruiting']" in dash)
+check("dashboard stage-day adjustment is admin-only and range-checked",
+      "ajax_action'] === 'adjust_stage_day'" in dash
+      and "if (!$isAdmin)" in dash[dash.find("ajax_action'] === 'adjust_stage_day'"):]
+      and "requestedDay > $expectedDays" in dash)
+check("dashboard stage-day adjustment preserves a notification audit",
+      "Stage Progress Adjusted" in dash
+      and "adjusted stage progress from day" in dash)
+check("dashboard exposes stage-day adjustment only in the admin UI",
+      'id="adjustStageDayModal"' in dash
+      and 'onclick="saveAdjustedStageDay()"' in dash)
 check("dashboard.php includes ml_widget.php", "biosync_ml/ml_widget.php" in dash)
 
 # -------------------------------------------------------------

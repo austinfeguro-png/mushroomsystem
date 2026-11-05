@@ -148,6 +148,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax_action'])) {
         echo json_encode(['success' => true, 'extendDays' => $extendDays]);
         exit();
     }
+
+    if ($_POST['ajax_action'] === 'adjust_stage_day') {
+        if (!$isAdmin) { http_response_code(403); echo json_encode(['success' => false, 'error' => 'Unauthorized']); exit(); }
+        $requestedDay = filter_var($_POST['stage_day'] ?? null, FILTER_VALIDATE_INT);
+        $settingsStmt = $pdo->query("SELECT setting_key, setting_value FROM system_settings WHERE setting_key IN ('stage_started_at', 'stage_expected_days')");
+        $stageSettings = $settingsStmt->fetchAll(PDO::FETCH_KEY_PAIR);
+        $expectedDays = filter_var($stageSettings['stage_expected_days'] ?? null, FILTER_VALIDATE_INT);
+        if ($requestedDay === false || $requestedDay === null || $expectedDays === false || $expectedDays === null
+            || $requestedDay < 0 || $requestedDay > $expectedDays) {
+            http_response_code(400);
+            echo json_encode(['success' => false, 'error' => 'Choose a stage day between 0 and the expected stage duration.']);
+            exit();
+        }
+        $stageStartedAt = $stageSettings['stage_started_at'] ?? '';
+        $previousDay = ($stageStartedAt !== '' && strtotime($stageStartedAt) !== false)
+            ? max(0, (int)floor((time() - strtotime($stageStartedAt)) / 86400)) : 0;
+        $newStartedAt = date('Y-m-d H:i:s', time() - ($requestedDay * 86400));
+        $saveStartedAt = $pdo->prepare("INSERT INTO system_settings (setting_key, setting_value)
+            VALUES ('stage_started_at', :started_at)
+            ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)");
+        $saveStartedAt->execute(['started_at' => $newStartedAt]);
+        $userName = $_SESSION['user_name'] ?? 'Admin';
+        $pdo->prepare("INSERT INTO notifications (title, description, message, type, icon_class, is_read, created_at)
+            VALUES ('Stage Progress Adjusted', :description, :message, 'info', 'fa-calendar-day', 0, NOW())")
+            ->execute([
+                'description' => "{$userName} adjusted stage progress from day {$previousDay} to day {$requestedDay}.",
+                'message' => "Stage progress adjusted to day {$requestedDay}.",
+            ]);
+        echo json_encode(['success' => true, 'daysPassed' => $requestedDay, 'expectedDays' => $expectedDays]);
+        exit();
+    }
 }
 
 // ==========================================
@@ -1196,6 +1227,12 @@ if ($alertTriggered) {
                     <div class="stage-days-value" style="color:<?php echo $stageColor; ?>;">
                         <?php echo $daysPassed; ?> / <?php echo $expectedDays; ?>
                     </div>
+                    <?php if ($isAdmin): ?>
+                    <button type="button" class="btn btn-ghost" onclick="openAdjustStageDayModal()"
+                        style="font-size:12px;min-height:44px;padding:6px 10px;margin-top:6px;">
+                        Adjust day
+                    </button>
+                    <?php endif; ?>
                 </div>
             </div>
 
@@ -1507,6 +1544,28 @@ if ($alertTriggered) {
         </div>
     </div>
 </div>
+
+<?php if ($isAdmin): ?>
+<!-- ADJUST STAGE DAY MODAL -->
+<div class="modal-backdrop" id="adjustStageDayModal" role="dialog" aria-modal="true" aria-labelledby="adjustStageDayTitle">
+    <div class="modal" style="max-width:420px;">
+        <div class="modal-head">
+            <h3 id="adjustStageDayTitle"><i class="fa-solid fa-calendar-day" style="color:var(--primary);margin-right:8px;"></i>Adjust Stage Day</h3>
+            <button class="modal-close" type="button" aria-label="Close" onclick="closeAdjustStageDayModal()"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <div class="modal-body">
+            <label for="adjustStageDayInput">Current stage day (0 to <?php echo $expectedDays; ?>)</label>
+            <input type="number" id="adjustStageDayInput" min="0" max="<?php echo $expectedDays; ?>" step="1" value="<?php echo $daysPassed; ?>"
+                style="width:100%;box-sizing:border-box;padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--bg-body);color:var(--text-main);font-size:16px;margin-top:8px;">
+            <p style="font-size:12px;color:var(--text-muted);margin-top:10px;">This updates progress timing only. It does not change the stage, duration, or reminder state.</p>
+        </div>
+        <div class="modal-foot">
+            <button class="btn btn-ghost" type="button" onclick="closeAdjustStageDayModal()">Cancel</button>
+            <button class="btn btn-primary" type="button" id="saveStageDayBtn" onclick="saveAdjustedStageDay()">Save day</button>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
 
 <!-- ADVANCE STAGE MODAL -->
 <div class="modal-backdrop" id="advanceModal">
@@ -1880,6 +1939,37 @@ function confirmExtend() {
         })
         .catch(() => { btn.textContent = 'Extend'; btn.disabled = false; });
 }
+
+<?php if ($isAdmin): ?>
+function openAdjustStageDayModal() {
+    const input = document.getElementById('adjustStageDayInput');
+    input.value = document.querySelector('.stage-days-value').textContent.trim().split('/')[0].trim();
+    document.getElementById('adjustStageDayModal').classList.add('open');
+    input.focus();
+}
+function closeAdjustStageDayModal() {
+    document.getElementById('adjustStageDayModal').classList.remove('open');
+}
+function saveAdjustedStageDay() {
+    const input = document.getElementById('adjustStageDayInput');
+    const day = Number(input.value);
+    if (!Number.isInteger(day) || day < 0 || day > Number(input.max)) {
+        alert('Enter a whole-number stage day within the expected duration.');
+        return;
+    }
+    const btn = document.getElementById('saveStageDayBtn');
+    btn.disabled = true;
+    post({ ajax_action: 'adjust_stage_day', stage_day: day })
+        .then(data => {
+            if (!data.success) throw new Error(data.error || 'Could not adjust stage progress.');
+            const daysEl = document.querySelector('.stage-days-value');
+            if (daysEl) daysEl.textContent = data.daysPassed + ' / ' + data.expectedDays;
+            closeAdjustStageDayModal();
+        })
+        .catch(error => alert(error.message || 'Could not adjust stage progress.'))
+        .finally(() => { btn.disabled = false; });
+}
+<?php endif; ?>
 
 // ================================================
 // ADVANCE STAGE MODAL
