@@ -104,6 +104,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax_action'])) {
             $stmt->execute(['key' => 'stage_started_at',   'val' => date('Y-m-d H:i:s')]);
             $stmt->execute(['key' => 'stage_expected_days','val' => $defaultDays]);
 
+            // Resolve the previous reminder but retain it in notification history.
+            $pdo->exec("UPDATE notifications SET is_read = 1 WHERE type = 'stage_reminder'");
+
             $userName = $_SESSION['user_name'] ?? 'Admin';
             $stageThresholds = [
                 'colonization' => '24–28°C | 70–85% RH',
@@ -133,6 +136,10 @@ $settings     = $settingsStmt->fetchAll(PDO::FETCH_KEY_PAIR);
 
 // FIX: stage-based thresholds — consistent with dashboard.php + live_data.php
 $stage     = $settings['current_stage'] ?? 'colonization';
+$stageStartedAt = $settings['stage_started_at'] ?? '';
+$expectedDays = (int)($settings['stage_expected_days'] ?? 14);
+$daysPassed = !empty($stageStartedAt) ? (int)floor((time() - strtotime($stageStartedAt)) / 86400) : 0;
+$stageReminderDue = !empty($stageStartedAt) && $expectedDays > 0 && $daysPassed >= $expectedDays;
 $MIN_TEMP  = (float)($settings["{$stage}_min_temp"] ?? 24.0);
 $MAX_TEMP  = (float)($settings["{$stage}_max_temp"] ?? 28.0);
 $MIN_HUM   = (float)($settings["{$stage}_min_hum"]  ?? 70.0);
@@ -955,6 +962,11 @@ foreach ($notifications as $n) {
                             </div>
                             <div class="notif-desc"><?php echo htmlspecialchars($n['description']); ?></div>
                             <div class="notif-actions">
+                                <?php if ($type === 'stage_reminder' && $stageReminderDue): ?>
+                                <a class="btn-sm resolve" href="dashboard.php#stageReminderBanner">
+                                    <i class="fa-solid fa-arrow-up-right-from-square"></i> Review stage
+                                </a>
+                                <?php endif; ?>
                                 <?php if ($isUnread): ?>
                                 <button class="btn-sm resolve js-mark-read">
                                     <i class="fa-solid fa-check"></i> Mark resolved

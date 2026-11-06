@@ -161,7 +161,7 @@ boards USB-powered with the 5V-to-VIN jumper removed during this test.
   the state as stale after 15 seconds. If the sensor reading expires, the bridge
   sends state-only feedback so a safe OFF state still reaches the dashboard
   without writing stale sensor data.
-- Pump continuous runtime is limited to 30 seconds, followed by a 60-second
+- Pump continuous runtime is limited to 10 seconds, followed by a 60-second
   cooldown after **every** stop. Reboot clears these in-memory timers. Network
   HTTP waits run only on the NodeMCU, so they cannot block Uno pump enforcement.
 - Blue/yellow LEDs show commanded fan/pump states, not measured load operation.

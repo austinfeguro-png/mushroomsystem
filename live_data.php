@@ -42,12 +42,7 @@ $daysPassed     = (!empty($stageStartedAt))
     ? (int)floor((time() - strtotime($stageStartedAt)) / 86400)
     : 0;
 
-// Stage reminder check
-$reminderStmt = $pdo->prepare(
-    "SELECT COUNT(*) FROM notifications WHERE type='stage_reminder' AND is_read=0"
-);
-$reminderStmt->execute();
-$pendingReminder = (int)$reminderStmt->fetchColumn() > 0;
+$pendingReminder = !empty($stageStartedAt) && $expectedDays > 0 && $daysPassed >= $expectedDays;
 
 // ── FIX (Issue 3): Single query for ALL device states ──────
 $devStmt = $pdo->query("SELECT device_name, current_state FROM devices");

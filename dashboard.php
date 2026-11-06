@@ -97,6 +97,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax_action'])) {
             $stmt->execute(['key' => 'stage_started_at',   'val' => date('Y-m-d H:i:s')]);
             $stmt->execute(['key' => 'stage_expected_days','val' => $defaultDays]);
 
+            // Resolve the previous reminder but retain it in notification history.
+            $pdo->exec("UPDATE notifications SET is_read = 1 WHERE type = 'stage_reminder'");
+
             // Log transition notification
             $userName = $_SESSION['user_name'] ?? 'Admin';
             $stageThresholds = [
@@ -232,10 +235,8 @@ $stageStartedAt = $settings['stage_started_at']  ?? '';
 $expectedDays   = (int)($settings['stage_expected_days'] ?? 14);
 $daysPassed     = (!empty($stageStartedAt)) ? (int)floor((time() - strtotime($stageStartedAt)) / 86400) : 0;
 
-// Check pending stage reminder
-$reminderStmt = $pdo->prepare("SELECT COUNT(*) FROM notifications WHERE type='stage_reminder' AND is_read=0");
-$reminderStmt->execute();
-$pendingReminder = (int)$reminderStmt->fetchColumn() > 0;
+// A reminder is active only after the current stage duration has elapsed.
+$pendingReminder = !empty($stageStartedAt) && $expectedDays > 0 && $daysPassed >= $expectedDays;
 
 // Latest sensor values
 $tempStmt    = $pdo->query("SELECT recorded_value FROM sensor_logs WHERE device_id = (SELECT id FROM devices WHERE device_name = 'Temperature Node 1' LIMIT 1) ORDER BY recorded_at DESC LIMIT 1");

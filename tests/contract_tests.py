@@ -205,7 +205,7 @@ check("Uno pin map matches two-board wiring",
                                     "FAN_LED = 8", "PUMP_LED = 9", "nodeLink(12, 11)"])
       and "unoLink(D6, D7)" in sketch)
 check("Uno owns pump deadline and stale-command fail-safe independently of networking",
-      "COMMAND_TIMEOUT = 30000UL" in uno and "PUMP_MAX_RUN_MS = 30000UL" in uno
+      "COMMAND_TIMEOUT = 30000UL" in uno and "PUMP_MAX_RUN_MS = 10000UL" in uno
       and "now - lastCommand < COMMAND_TIMEOUT" in uno
       and "now - pumpStarted >= PUMP_MAX_RUN_MS" in uno
       and "ESP8266HTTPClient" not in uno and "delay(" not in uno)
@@ -337,6 +337,13 @@ check("api_update alerts on low temp", "$temperature < $MIN_TEMP" in api)
 check("stage reminder deduplication includes already-read reminders",
       bool(re.search(r"WHERE type\s*=\s*'stage_reminder'\s+AND created_at\s*>=\s*:since", api))
       and not bool(re.search(r"WHERE type\s*=\s*'stage_reminder'\s+AND is_read\s*=\s*0", api)))
+check("current stage reminder remains reopenable after being read",
+      all("$daysPassed >= $expectedDays" in src for src in (dash, live))
+      and "dashboard.php#stageReminderBanner" in notif
+      and "if ($type === 'stage_reminder' && $stageReminderDue)" in notif)
+check("stage transition resolves old reminder while retaining notification history",
+      all("UPDATE notifications SET is_read = 1 WHERE type = 'stage_reminder'" in src
+          for src in (dash, notif)))
 check("live_data requires an authenticated session before returning data",
       "if (!isset($_SESSION['user_id']))" in live and "Authentication required." in live)
 
