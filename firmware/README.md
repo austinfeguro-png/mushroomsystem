@@ -141,6 +141,8 @@ boards USB-powered with the 5V-to-VIN jumper removed during this test.
   `temp`, `hum`, `log`, and `X-Device-Token`. It includes `fan_actual` and
   `pump_actual` only when it has recent Uno output feedback. It requests a database log on the
   first successful request and every ten minutes thereafter, not on every sync.
+  The dashboard marks readings stale after 30 seconds without a valid sensor POST
+  and pauses its ML prediction until fresh data returns.
   PHP/Apache and MariaDB must be running. HTTP 403 indicates token configuration;
   TLS certificate or clock errors prevent the request from being sent.
   An Uno `ERR:` frame immediately invalidates the cached reading so stale sensor

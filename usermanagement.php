@@ -4,12 +4,14 @@ if (empty($_SESSION['csrf_token'])) {
     $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
 }
 if (!isset($_SESSION['user_id'])) { header("Location: index.php"); exit(); }
-if (!isset($_SESSION['user_role']) || strtolower($_SESSION['user_role']) !== 'admin') { header("Location: dashboard.php"); exit(); }
-$userName = $_SESSION['user_name'];
 
 // DB via shared config.php
 require_once 'config.php';
 $pdo = getDB();
+require_once 'auth_guard.php';
+requireCurrentActiveUser($pdo);
+if (!isset($_SESSION['user_role']) || strtolower($_SESSION['user_role']) !== 'admin') { header("Location: dashboard.php"); exit(); }
+$userName = $_SESSION['user_name'];
 
 function jsArg($value) {
     return htmlspecialchars(
@@ -86,6 +88,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax_action'])) {
 
             $stmt->execute(['key' => 'stage_started_at',   'val' => date('Y-m-d H:i:s')]);
             $stmt->execute(['key' => 'stage_expected_days','val' => $defaultDays]);
+
+            $pdo->exec("UPDATE notifications SET is_read = 1 WHERE type = 'stage_reminder'");
 
             $userName = $_SESSION['user_name'] ?? 'Admin';
             $stageThresholds = [

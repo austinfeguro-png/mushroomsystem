@@ -11,15 +11,16 @@ if (!isset($_SESSION['user_id'])) {
     exit();
 }
 
-$userName = $_SESSION['user_name'];
-$userId   = $_SESSION['user_id'];
-$isAdmin = isset($_SESSION['user_role']) && strtolower($_SESSION['user_role']) === 'admin';
-
 // ==========================================
 // 2. DATABASE CONNECTION (shared config.php)
 // ==========================================
 require_once 'config.php';
 $pdo = getDB();
+require_once 'auth_guard.php';
+requireCurrentActiveUser($pdo);
+$userName = $_SESSION['user_name'];
+$userId   = $_SESSION['user_id'];
+$isAdmin  = isset($_SESSION['user_role']) && strtolower($_SESSION['user_role']) === 'admin';
 
 // ==========================================
 // 3. HANDLE AJAX POST REQUESTS

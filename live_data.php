@@ -15,6 +15,8 @@ if (!isset($_SESSION['user_id'])) {
 
 require_once 'config.php';
 $pdo = getDB();
+require_once 'auth_guard.php';
+requireCurrentActiveUser($pdo, true);
 
 // ── Settings (single query) ─────────────────────────────────
 $settingsStmt = $pdo->query("SELECT setting_key, setting_value FROM system_settings");
@@ -50,6 +52,10 @@ $devices = $devStmt->fetchAll(PDO::FETCH_KEY_PAIR);
 
 $temperature = (float)($devices['Temperature Node 1'] ?? 0.0);
 $humidity    = (float)($devices['Humidity Node 1']    ?? 0.0);
+$sensorReportedAt = (int)($settings['sensor_reading_reported_at'] ?? 0);
+$sensorDataAge = $sensorReportedAt > 0 ? max(0, time() - $sensorReportedAt) : null;
+$sensorDataFresh = ($settings['sensor_reading_valid'] ?? '0') === '1'
+    && $sensorDataAge !== null && $sensorDataAge <= 30;
 $fanState    = ($devices['Ventilation Fan'] ?? '0') == '1';
 $pumpState   = ($devices['Water Pump']      ?? '0') == '1';
 $fanMode     = ($settings['fan_control_mode'] ?? 'auto') === 'manual' ? 'manual' : 'auto';
@@ -111,6 +117,8 @@ $notifs = $nq->fetchAll(PDO::FETCH_ASSOC);
 echo json_encode([
     'temperature'    => $temperature,
     'humidity'       => $humidity,
+    'sensorDataFresh' => $sensorDataFresh,
+    'sensorDataAge'   => $sensorDataAge,
     'fanState'       => $fanState,
     'pumpState'      => $pumpState,
     'fanMode'        => $fanMode,

@@ -25,6 +25,8 @@ require_once 'config.php';
 
 try {
     $pdo = getDB();
+    require_once 'auth_guard.php';
+    requireCurrentActiveUser($pdo, true);
     $stmt = $pdo->prepare(
         'INSERT INTO user_presence (session_hash, user_id, last_seen_at)
          VALUES (:session_hash, :user_id, :last_seen_at)

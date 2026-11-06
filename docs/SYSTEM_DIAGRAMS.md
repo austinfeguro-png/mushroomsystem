@@ -10,10 +10,11 @@ Mermaid diagrams of the Bio-Sync mushroom-growing monitoring & automation system
 flowchart TB
     subgraph HW["Grow Room (Arduino + ESP8266)"]
         DHT["DHT22 Sensor<br/>temp + humidity"]
-        ESP["ESP8266 WiFi module"]
-        FAN["Ventilation Fan<br/>(pin 5)"]
-        PUMP["Water Pump<br/>(pin 6)"]
-        LED["System Alert Indicator<br/>(pin 7)"]
+        UNO["Arduino Uno<br/>sensor + actuator control"]
+        ESP["ESP8266 NodeMCU<br/>WiFi bridge"]
+        FAN["Fan relay input<br/>Uno D4"]
+        PUMP["Pump relay input<br/>Uno D5"]
+        LED["Onboard fault indicator<br/>Uno D13"]
     end
 
     subgraph WEB["Web Layer (XAMPP / PHP)"]
@@ -32,23 +33,24 @@ flowchart TB
         FLASK["prediction_api.py<br/>/predict /metrics /health"]
     end
 
-    DHT --> ESP
-    ESP -->|"Authenticated POST temp + hum (every cycle)"| API
+    DHT --> UNO
+    UNO <-->|"Serial link"| ESP
+    UNO --> FAN
+    UNO --> PUMP
+    UNO --> LED
+    ESP -->|"Authenticated POST temp + hum (every 10 s)"| API
     API -->|"reads current_stage + thresholds"| DB
     API -->|"sensor_logs (value, timestamp, stage)"| DB
     API -->|"devices.current_state<br/>Temp/Hum/Fan/Pump"| DB
     API -->|"notifications (alert, stage_reminder)"| DB
     API -->|"CMD:FAN=n,PUMP=n + stage thresholds"| ESP
-    ESP --> FAN
-    ESP --> PUMP
-    ESP --> LED
 
     DB -.-> CFG
     DASH -->|"poll every 5s"| LIVE
     LIVE --> DB
     DASH -->|"stage switch, Extend/Advance,<br/>settings"| DB
     DASH -->|"includes"| MLW
-    MLW -->|"/predict + /metrics (2s timeout)"| FLASK
+    MLW -->|"/predict (8 s timeout)"| FLASK
     OTHER --> DB
 
     DB -->|"paired sensor history"| TRAIN
@@ -60,11 +62,13 @@ flowchart TB
 
 | Command | Meaning | Hardware response |
 |---|---|---|
-| `FAN=1` | Temp **above max** (fan ON cools) — or **below min** (design question: no heater) | Relay pin 5 HIGH |
-| `FAN=0` | Temp inside stage band | Relay pin 5 LOW |
-| `PUMP=1` | Humidity below stage minimum | Relay pin 6 HIGH |
-| `PUMP=0` | Humidity at or above stage minimum | Relay pin 6 LOW |
-| `FAN=1` | Temperature outside band or humidity above stage maximum | Relay pin 5 HIGH |
+| `FAN=1` | Auto: temperature above max or humidity above max. Manual: requested ON. No low-temperature heating action. | Uno D4 asserted LOW (active-low relay input) |
+| `FAN=0` | Auto thresholds do not request cooling, or Manual request is OFF; failsafe also forces OFF. | Uno D4 HIGH (relay off) |
+| `PUMP=1` | Auto: humidity below stage minimum. Manual: requested ON. | Uno D5 asserted LOW only when sensor/command are valid and pump runtime/cooldown allow it |
+| `PUMP=0` | Not requested, humidity above stage maximum, failsafe, runtime limit, or cooldown. | Uno D5 HIGH (relay off) |
+
+The Uno enforces a 10-second maximum continuous pump run and a 60-second cooldown
+after every stop. Relay input polarity must be verified with the actual module.
 
 ---
 
@@ -74,13 +78,15 @@ flowchart TB
 sequenceDiagram
     autonumber
     participant DHT as DHT22
+    participant UNO as Arduino Uno
     participant ESP as ESP8266
     participant API as api_update.php
     participant DB as biosync_db
     participant NOTIF as notifications
     participant SET as system_settings
 
-    DHT->>ESP: read temp + humidity
+    DHT->>UNO: sample temp + humidity every 3 s
+    UNO->>ESP: DATA:TEMP, HUM and applied output STATE
     ESP->>API: HTTPS POST temp=27.4&hum=86.2 + X-Device-Token
     API->>API: verify token + validate numeric ranges (-10..60 C, 0..100 %)
     alt missing token or invalid values
@@ -88,8 +94,9 @@ sequenceDiagram
     end
     API->>SET: read current_stage + {stage}_min/max_temp, _min/max_hum
     SET-->>API: e.g. colonization: 24-28 C, 70-85 %
-    API->>DB: INSERT sensor_logs (temp, NOW(), stage)
-    API->>DB: INSERT sensor_logs (hum, NOW(), stage)
+    opt first request and every ten minutes
+        API->>DB: INSERT sensor_logs (temp and humidity, timestamp, stage)
+    end
     API->>DB: UPDATE devices (Temp Node, Hum Node)
     API->>API: fan = temp outside band OR hum>max<br/>pump = hum<min
     API->>DB: UPDATE devices (Fan, Pump)
@@ -103,7 +110,9 @@ sequenceDiagram
         API->>NOTIF: INSERT one stage_reminder per stage period
     end
     API-->>ESP: CMD:FAN=1,PUMP=0 + active thresholds
-    ESP->>ESP: update local thresholds, parse FAN= / PUMP=, drive pins
+    ESP->>UNO: forward complete validated CMD
+    UNO->>UNO: apply thresholds, failsafes, pump runtime and cooldown
+    UNO->>ESP: STATE:FAN=n,PUMP=n
 ```
 
 ## 3. Sequence Diagram — Dashboard Poll + ML Prediction (every 5 s)

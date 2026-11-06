@@ -23,15 +23,16 @@ if (empty($_SESSION['csrf_token'])) {
 }
 $csrfToken = $_SESSION['csrf_token'];
 
-$userName = $_SESSION['user_name'] ?? '';
-$userId   = $_SESSION['user_id'];
-$isAdmin  = isset($_SESSION['user_role']) && strtolower($_SESSION['user_role']) === 'admin';
-
 // ==========================================
 // 2. DATABASE CONNECTION (shared config.php)
 // ==========================================
 require_once 'config.php';
 $pdo = getDB();
+require_once 'auth_guard.php';
+requireCurrentActiveUser($pdo, $isAjax, 'login.php');
+$userName = $_SESSION['user_name'] ?? '';
+$userId   = $_SESSION['user_id'];
+$isAdmin  = isset($_SESSION['user_role']) && strtolower($_SESSION['user_role']) === 'admin';
 
 // ==========================================
 // 3. HANDLE AJAX POST ACTIONS
@@ -102,6 +103,8 @@ if ($isAjax) {
 
                 $stmt->execute(['key' => 'stage_started_at',    'val' => date('Y-m-d H:i:s')]);
                 $stmt->execute(['key' => 'stage_expected_days', 'val' => $defaultDaysMap[$newStage]]);
+
+                $pdo->exec("UPDATE notifications SET is_read = 1 WHERE type = 'stage_reminder'");
 
                 $pdo->prepare("INSERT INTO notifications (title, description, message, type, icon_class, is_read, created_at)
                     VALUES (:title, :desc, :msg, 'info', 'fa-seedling', 0, NOW())")

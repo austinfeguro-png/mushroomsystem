@@ -30,7 +30,7 @@ if ($deviceToken === '' || !hash_equals($deviceToken, (string)$providedToken)) {
 
 $pdo = getDB();
 
-function persistActuatorFeedback(PDO $pdo, int $fanState, int $pumpState): void {
+function persistActuatorFeedback(PDO $pdo, int $fanState, int $pumpState, ?bool $sensorValid = null): void {
     $pdo->beginTransaction();
     try {
         $stmt = $pdo->prepare("UPDATE devices SET current_state = :val WHERE device_name = :name");
@@ -40,10 +40,26 @@ function persistActuatorFeedback(PDO $pdo, int $fanState, int $pumpState): void 
             VALUES ('actuator_state_reported_at', :reported_at)
             ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)")
             ->execute(['reported_at' => (string)time()]);
+        if ($sensorValid !== null) {
+            $pdo->prepare("INSERT INTO system_settings (setting_key, setting_value)
+                VALUES ('sensor_reading_valid', :valid)
+                ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)")
+                ->execute(['valid' => $sensorValid ? '1' : '0']);
+        }
         $pdo->commit();
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) $pdo->rollBack();
         throw $e;
+    }
+}
+
+function markSensorReadingInvalid(PDO $pdo): void {
+    try {
+        $pdo->prepare("INSERT INTO system_settings (setting_key, setting_value)
+            VALUES ('sensor_reading_valid', '0')
+            ON DUPLICATE KEY UPDATE setting_value = '0'")->execute();
+    } catch (Throwable $e) {
+        error_log("BioSync sensor validity update error: " . $e->getMessage());
     }
 }
 
@@ -59,7 +75,7 @@ if (isset($_POST['state_only']) && (string)$_POST['state_only'] === '1') {
         exit;
     }
     try {
-        persistActuatorFeedback($pdo, (int)$fanActual, (int)$pumpActual);
+        persistActuatorFeedback($pdo, (int)$fanActual, (int)$pumpActual, false);
     } catch (Throwable $e) {
         error_log("BioSync actuator feedback error: " . $e->getMessage());
         http_response_code(500);
@@ -78,6 +94,8 @@ $humidityRaw    = $_POST['hum'] ?? null;
 
 if (!is_scalar($temperatureRaw) || !is_numeric($temperatureRaw)
     || !is_scalar($humidityRaw) || !is_numeric($humidityRaw)) {
+    markSensorReadingInvalid($pdo);
+    http_response_code(400);
     echo "CMD:FAN=0,PUMP=0";
     exit;
 }
@@ -86,12 +104,22 @@ $humidity    = (float)$humidityRaw;
 
 // FIX (Issue 2): Range validation — reject implausible sensor values
 if ($temperature < -10 || $temperature > 60) {
+    markSensorReadingInvalid($pdo);
+    http_response_code(400);
     error_log("BioSync: Implausible temperature value rejected: $temperature");
     echo "CMD:FAN=0,PUMP=0";
     exit;
 }
 if ($humidity < 0 || $humidity > 100) {
+    markSensorReadingInvalid($pdo);
+    http_response_code(400);
     error_log("BioSync: Implausible humidity value rejected: $humidity");
+    echo "CMD:FAN=0,PUMP=0";
+    exit;
+}
+if ($temperature == 0.0 && $humidity == 0.0) {
+    markSensorReadingInvalid($pdo);
+    http_response_code(400);
     echo "CMD:FAN=0,PUMP=0";
     exit;
 }
@@ -150,6 +178,14 @@ try {
         UPDATE devices SET current_state = :val
         WHERE device_name = 'Humidity Node 1'
     ")->execute(['val' => $humidity]);
+
+    $pdo->prepare("INSERT INTO system_settings (setting_key, setting_value)
+        VALUES ('sensor_reading_reported_at', :reported_at)
+        ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)")
+        ->execute(['reported_at' => (string)time()]);
+    $pdo->prepare("INSERT INTO system_settings (setting_key, setting_value)
+        VALUES ('sensor_reading_valid', '1')
+        ON DUPLICATE KEY UPDATE setting_value = '1'")->execute();
 } catch (PDOException $e) {
     error_log("BioSync device update error: " . $e->getMessage());
 }

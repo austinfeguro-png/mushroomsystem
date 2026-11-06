@@ -11,15 +11,16 @@ if (!isset($_SESSION['user_id'])) {
     exit();
 }
 
-$userName = $_SESSION['user_name'];
-$userId   = $_SESSION['user_id'];
-$isAdmin = isset($_SESSION['user_role']) && strtolower($_SESSION['user_role']) === 'admin';
-
 // ==========================================
 // 2. DATABASE CONNECTION (shared config.php)
 // ==========================================
 require_once 'config.php';
 $pdo = getDB();
+require_once 'auth_guard.php';
+requireCurrentActiveUser($pdo);
+$userName = $_SESSION['user_name'];
+$userId   = $_SESSION['user_id'];
+$isAdmin  = isset($_SESSION['user_role']) && strtolower($_SESSION['user_role']) === 'admin';
 
 // 4. HANDLE AJAX POST REQUESTS
 // ==========================================
@@ -60,6 +61,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax_action'])) {
 
             $stmt->execute(['key' => 'stage_started_at',   'val' => date('Y-m-d H:i:s')]);
             $stmt->execute(['key' => 'stage_expected_days','val' => $defaultDays]);
+
+            $pdo->exec("UPDATE notifications SET is_read = 1 WHERE type = 'stage_reminder'");
 
             $userName = $_SESSION['user_name'] ?? 'Admin';
             $stageThresholds = [

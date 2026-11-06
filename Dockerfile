@@ -14,7 +14,7 @@ RUN sed -i 's/^Listen 80$/Listen 10000/' /etc/apache2/ports.conf \
     && sed -i 's/<VirtualHost \*:80>/<VirtualHost *:10000>/' /etc/apache2/sites-available/000-default.conf
 
 COPY .htaccess /var/www/html/.htaccess
-COPY config.php index.php login.php logout.php dashboard.php live_data.php \
+COPY config.php auth_guard.php index.php login.php logout.php dashboard.php live_data.php \
     presence.js user_presence.php \
     historicaldatapage.php notificationspage.php profile.php usermanagement.php \
     api_update.php /var/www/html/

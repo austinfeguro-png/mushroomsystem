@@ -11,15 +11,16 @@ if (!isset($_SESSION['user_id'])) {
     exit();
 }
 
-$userName = $_SESSION['user_name'];
-$userId   = $_SESSION['user_id'];
-$isAdmin  = isset($_SESSION['user_role']) && strtolower($_SESSION['user_role']) === 'admin';
-
 // ==========================================
 // 2. DATABASE CONNECTION (shared config.php)
 // ==========================================
 require_once 'config.php';
 $pdo = getDB();
+require_once 'auth_guard.php';
+requireCurrentActiveUser($pdo);
+$userName = $_SESSION['user_name'];
+$userId   = $_SESSION['user_id'];
+$isAdmin  = isset($_SESSION['user_role']) && strtolower($_SESSION['user_role']) === 'admin';
 
 // 4. HANDLE AJAX POST REQUESTS
 // ==========================================
@@ -190,7 +191,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax_action'])) {
 $stmt = $pdo->query("
     SELECT device_name, current_state
     FROM devices
-    WHERE device_name IN ('Ventilation Fan', 'Water Pump')
+    WHERE device_name IN ('Temperature Node 1', 'Humidity Node 1', 'Ventilation Fan', 'Water Pump')
 ");
 $devices = $stmt->fetchAll(PDO::FETCH_KEY_PAIR);
 
@@ -211,6 +212,10 @@ $MAX_HUM  = (float)($settings["{$stage}_max_hum"]  ?? 95.0);
 $TEMP_UNIT= $settings['temperature_unit'] ?? 'C';
 $EMAIL_NOTIF = $settings['email_notifications'] ?? '1';
 $activeAlgo  = $settings['active_ml_algorithm'] ?? 'Random Forest';
+$sensorReportedAt = (int)($settings['sensor_reading_reported_at'] ?? 0);
+$sensorDataAge = $sensorReportedAt > 0 ? max(0, time() - $sensorReportedAt) : null;
+$sensorDataFresh = ($settings['sensor_reading_valid'] ?? '0') === '1'
+    && $sensorDataAge !== null && $sensorDataAge <= 30;
 
 $stageLabelMap = [
     'colonization' => 'Colonization',
@@ -238,12 +243,9 @@ $daysPassed     = (!empty($stageStartedAt)) ? (int)floor((time() - strtotime($st
 // A reminder is active only after the current stage duration has elapsed.
 $pendingReminder = !empty($stageStartedAt) && $expectedDays > 0 && $daysPassed >= $expectedDays;
 
-// Latest sensor values
-$tempStmt    = $pdo->query("SELECT recorded_value FROM sensor_logs WHERE device_id = (SELECT id FROM devices WHERE device_name = 'Temperature Node 1' LIMIT 1) ORDER BY recorded_at DESC LIMIT 1");
-$temperature = (float)$tempStmt->fetchColumn();
-
-$humStmt  = $pdo->query("SELECT recorded_value FROM sensor_logs WHERE device_id = (SELECT id FROM devices WHERE device_name = 'Humidity Node 1' LIMIT 1) ORDER BY recorded_at DESC LIMIT 1");
-$humidity = (float)$humStmt->fetchColumn();
+// Latest sensor values come from the device state; historical logs are sampled less often.
+$temperature = (float)($devices['Temperature Node 1'] ?? 0.0);
+$humidity    = (float)($devices['Humidity Node 1'] ?? 0.0);
 
 $fanState  = isset($devices['Ventilation Fan']) && $devices['Ventilation Fan'] == '1';
 $pumpState = isset($devices['Water Pump'])      && $devices['Water Pump']      == '1';
@@ -288,15 +290,15 @@ $alertTriggered    = false;
 $abnormalConditions = [];
 $conditionString   = '';
 
-if ($temperature > $MAX_TEMP) {
+if ($sensorDataFresh && $temperature > $MAX_TEMP) {
     $abnormalConditions[] = "Temperature is {$temperature}°{$TEMP_UNIT} (Max: {$MAX_TEMP}°{$TEMP_UNIT})";
     $alertTriggered = true;
 }
-if ($temperature < $MIN_TEMP) {
+if ($sensorDataFresh && $temperature < $MIN_TEMP) {
     $abnormalConditions[] = "Temperature is {$temperature}°{$TEMP_UNIT} (Min: {$MIN_TEMP}°{$TEMP_UNIT})";
     $alertTriggered = true;
 }
-if ($humidity < $MIN_HUM || $humidity > $MAX_HUM) {
+if ($sensorDataFresh && ($humidity < $MIN_HUM || $humidity > $MAX_HUM)) {
     $abnormalConditions[] = "Humidity is {$humidity}% (Allowed: {$MIN_HUM}%–{$MAX_HUM}%)";
     $alertTriggered = true;
 }
@@ -1187,6 +1189,12 @@ if ($alertTriggered) {
                 <div id="alertBannerText" style="flex:1;"><strong>ALERT:</strong> <?php echo $conditionString; ?>. Auto-systems started.</div>
             </div>
 
+            <div class="alert-banner" id="sensorStaleBanner" role="status"
+                 style="display:<?php echo $sensorDataFresh ? 'none' : 'flex'; ?>;background:#fff7ed;border-color:#f59e0b;color:#92400e;">
+                <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+                <div>No recent sensor reading. Displayed values may be stale; actuator control is in its fail-safe state.</div>
+            </div>
+
             <!-- STAGE REMINDER BANNER -->
             <?php if ($pendingReminder): ?>
             <div class="stage-reminder-banner" id="stageReminderBanner">
@@ -1349,7 +1357,11 @@ if ($alertTriggered) {
             <!-- ML CONDITION PREDICTION PANEL -->
             <div class="grid" style="grid-template-columns:1fr;margin-bottom:20px;">
                 <div class="card" id="mlWidgetCard">
-                    <?php include __DIR__ . '/biosync_ml/ml_widget.php'; ?>
+                    <?php if ($sensorDataFresh): ?>
+                        <?php include __DIR__ . '/biosync_ml/ml_widget.php'; ?>
+                    <?php else: ?>
+                        <p style="color:var(--text-muted);">Prediction paused until fresh sensor readings arrive.</p>
+                    <?php endif; ?>
                 </div>
             </div>
 
@@ -2110,7 +2122,9 @@ function updateLiveData() {
             const banner     = document.getElementById('alertBanner');
             const bannerText = document.getElementById('alertBannerText');
             const notifDot   = document.querySelector('.notif-dot');
-            const isAbnormal = d.tempAbove || d.tempBelow || d.humAbove || d.humBelow;
+            const sensorStaleBanner = document.getElementById('sensorStaleBanner');
+            if (sensorStaleBanner) sensorStaleBanner.style.display = d.sensorDataFresh ? 'none' : 'flex';
+            const isAbnormal = d.sensorDataFresh && (d.tempAbove || d.tempBelow || d.humAbove || d.humBelow);
             if (banner) {
                 if (isAbnormal) {
                     const msgs = [];
@@ -2145,22 +2159,31 @@ function updateLiveData() {
             const notifList = document.getElementById('recentNotifList');
             if (notifList && d.notifications) {
                 if (d.notifications.length > 0) {
-                    notifList.innerHTML = d.notifications.map(n => {
+                    notifList.replaceChildren();
+                    d.notifications.forEach(n => {
                         const isAlert = n.type === 'alert';
                         const isInfo  = n.type === 'info';
                         const cls     = 'notif-item' + (isAlert ? ' alert' : isInfo ? ' info' : '');
-                        const iconClr = isAlert ? 'color:var(--danger)' : (isInfo ? 'color:var(--primary)' : 'color:var(--text-light)');
-                        const icon    = n.icon_class || 'fa-bell';
-                        const d_time  = formatUtcNotificationTime(n.created_at);
-                        return '<div class="' + cls + '">' +
-                            '<i class="fa-solid ' + icon + '" style="' + iconClr + '"></i>' +
-                            '<div>' +
-                                '<div class="notif-title">' + (n.title || 'Notification') + '</div>' +
-                                '<div class="notif-desc">' + (n.description || n.message || '') + '</div>' +
-                                '<div class="notif-time">' + d_time + '</div>' +
-                            '</div>' +
-                        '</div>';
-                    }).join('');
+                        const iconName = /^fa-[a-z0-9-]+$/.test(n.icon_class || '') ? n.icon_class : 'fa-bell';
+                        const item = document.createElement('div');
+                        item.className = cls;
+                        const icon = document.createElement('i');
+                        icon.className = 'fa-solid ' + iconName;
+                        icon.style.color = isAlert ? 'var(--danger)' : (isInfo ? 'var(--primary)' : 'var(--text-light)');
+                        const body = document.createElement('div');
+                        const title = document.createElement('div');
+                        title.className = 'notif-title';
+                        title.textContent = n.title || 'Notification';
+                        const description = document.createElement('div');
+                        description.className = 'notif-desc';
+                        description.textContent = n.description || n.message || '';
+                        const time = document.createElement('div');
+                        time.className = 'notif-time';
+                        time.textContent = formatUtcNotificationTime(n.created_at);
+                        body.append(title, description, time);
+                        item.append(icon, body);
+                        notifList.appendChild(item);
+                    });
                 } else {
                     notifList.innerHTML = '<div class="notif-item info">' +
                         '<i class="fa-solid fa-circle-check" style="color:var(--primary)"></i>' +
@@ -2190,12 +2213,19 @@ function updateLiveData() {
             // ── ML Widget ─────────────────────────────────
             const mlCard = document.getElementById('mlWidgetCard');
             if (mlCard) {
-                const algo = encodeURIComponent(d.activeAlgo || 'Random Forest');
-                const stg  = encodeURIComponent(d.stage || 'fruiting');
-                fetch('biosync_ml/ml_widget.php?temp=' + d.temperature + '&hum=' + d.humidity + '&algo=' + algo + '&stage=' + stg)
-                    .then(r => r.text())
-                    .then(html => { if (html && html.trim()) mlCard.innerHTML = html; })
-                    .catch(() => {});
+                if (d.sensorDataFresh) {
+                    const algo = encodeURIComponent(d.activeAlgo || 'Random Forest');
+                    const stg  = encodeURIComponent(d.stage || 'fruiting');
+                    fetch('biosync_ml/ml_widget.php?temp=' + d.temperature + '&hum=' + d.humidity + '&algo=' + algo + '&stage=' + stg)
+                        .then(r => r.text())
+                        .then(html => { if (html && html.trim()) mlCard.innerHTML = html; })
+                        .catch(() => {});
+                } else {
+                    const staleMessage = document.createElement('p');
+                    staleMessage.style.color = 'var(--text-muted)';
+                    staleMessage.textContent = 'Prediction paused until fresh sensor readings arrive.';
+                    mlCard.replaceChildren(staleMessage);
+                }
             }
 
         })
