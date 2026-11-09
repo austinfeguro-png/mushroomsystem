@@ -1075,9 +1075,10 @@ if ($alertTriggered) {
             max-height: 0;
         }
         .device-feedback.show {
-            max-height: 32px;
+            max-height: 60px;
             padding: 4px 8px;
         }
+        .device-feedback.pending { color: var(--text-muted); background: var(--bg-body); }
         .device-feedback.success {
             color: var(--primary);
             background: var(--primary-light);
@@ -1705,13 +1706,37 @@ let pendingSettings = false;   // blocks auto-refresh during settings save
 let deviceControlVersion = 0;
 let liveDataSequence = 0;
 let lastMlPredictionKey = null;
+const actuatorConfirmations = { fan: null, pump: null };
+const feedbackTimers = {};
+const ACTUATOR_CONFIRM_TIMEOUT_MS = 25000;
 
-function showFeedback(feedbackId, message, type) {
+function showFeedback(feedbackId, message, type, duration = 2500) {
     const el = document.getElementById(feedbackId);
     if (!el) return;
+    if (feedbackTimers[feedbackId]) clearTimeout(feedbackTimers[feedbackId]);
     el.textContent = message;
     el.className = 'device-feedback show ' + type;
-    setTimeout(() => { el.className = 'device-feedback'; }, 2500);
+    if (duration > 0) {
+        feedbackTimers[feedbackId] = setTimeout(() => {
+            el.className = 'device-feedback';
+            delete feedbackTimers[feedbackId];
+        }, duration);
+    }
+}
+
+function updateActuatorConfirmation(prefix, actualState, feedbackFresh) {
+    const pending = actuatorConfirmations[prefix];
+    if (!pending) return;
+
+    if (feedbackFresh && Boolean(actualState) === pending.requestedState) {
+        actuatorConfirmations[prefix] = null;
+        showFeedback(pending.feedbackId,
+            'Hardware reports ' + (pending.requestedState ? 'ON.' : 'OFF.'), 'success', 4000);
+    } else if (Date.now() >= pending.deadline) {
+        actuatorConfirmations[prefix] = null;
+        showFeedback(pending.feedbackId,
+            'No matching hardware confirmation yet. Check the device connection.', 'error', 8000);
+    }
 }
 
 function toggleDevice(checkboxEl, deviceName, state, labelId, ledId, spinnerId, cardId, feedbackId, onText, offText) {
@@ -1737,10 +1762,16 @@ function toggleDevice(checkboxEl, deviceName, state, labelId, ledId, spinnerId, 
         .then(data => {
             if (!data.success) throw new Error('Server rejected toggle');
 
-            showFeedback(feedbackId, 'Manual request saved; waiting for hardware status.', 'success');
-            const mode = document.getElementById(deviceName === 'Ventilation Fan' ? 'fanMode' : 'pumpMode');
+            const prefix = deviceName === 'Ventilation Fan' ? 'fan' : 'pump';
+            actuatorConfirmations[prefix] = {
+                requestedState: state === '1',
+                deadline: Date.now() + ACTUATOR_CONFIRM_TIMEOUT_MS,
+                feedbackId: feedbackId
+            };
+            showFeedback(feedbackId, 'Request saved; waiting for device confirmation…', 'pending', 0);
+            const mode = document.getElementById(prefix + 'Mode');
             if (mode) { mode.textContent = 'MANUAL'; mode.classList.add('manual'); }
-            const autoButton = document.getElementById(deviceName === 'Ventilation Fan' ? 'fanAuto' : 'pumpAuto');
+            const autoButton = document.getElementById(prefix + 'Auto');
             if (autoButton) { autoButton.hidden = false; autoButton.disabled = false; autoButton.classList.add('is-available'); }
         })
         .catch(e => {
@@ -1774,11 +1805,12 @@ function setDeviceAuto(deviceName) {
         .then(r => r.json())
         .then(data => {
             if (!data.success) throw new Error('Server rejected automatic mode');
+            actuatorConfirmations[prefix] = null;
             const mode = document.getElementById(prefix + 'Mode');
             if (mode) { mode.textContent = 'AUTO'; mode.classList.remove('manual'); }
             if (autoButton) autoButton.hidden = true;
             if (autoButton) autoButton.classList.remove('is-available');
-            showFeedback(prefix + 'Feedback', 'Automatic threshold control restored.', 'success');
+            showFeedback(prefix + 'Feedback', 'Automatic mode saved; awaiting the next device update.', 'success', 5000);
         })
         .catch(() => {
             if (autoButton) { autoButton.hidden = false; autoButton.disabled = false; }
@@ -2092,6 +2124,7 @@ function updateLiveData() {
             const fanAuto = document.getElementById('fanAuto');
             if (!pendingToggle && controlVersion === deviceControlVersion) {
                 const fanFresh = d.actuatorFeedbackFresh === true;
+                updateActuatorConfirmation('fan', d.fanState, fanFresh);
                 if (fanLed) fanLed.className = 'led ' + (fanFresh ? (d.fanState ? 'on' : 'off') : 'stale');
                 if (fanLabel) {
                     fanLabel.className = 'state-label ' + (fanFresh ? (d.fanState ? 'on' : 'off') : 'stale');
@@ -2117,6 +2150,7 @@ function updateLiveData() {
             const pumpAuto = document.getElementById('pumpAuto');
             if (!pendingToggle && controlVersion === deviceControlVersion) {
                 const pumpFresh = d.actuatorFeedbackFresh === true;
+                updateActuatorConfirmation('pump', d.pumpState, pumpFresh);
                 if (pumpLed) pumpLed.className = 'led ' + (pumpFresh ? (d.pumpState ? 'on' : 'off') : 'stale');
                 if (pumpLabel) {
                     pumpLabel.className = 'state-label ' + (pumpFresh ? (d.pumpState ? 'on' : 'off') : 'stale');

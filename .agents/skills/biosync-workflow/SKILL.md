@@ -15,6 +15,17 @@ Use this for repository reviews and implementation requests. Read [the project m
 4. For review-first requests, ask `Apply which? (all / numbers / required only / none)` and wait. A direct request to implement a specific change authorizes that change; don’t ask again for already-approved work.
 5. Apply only authorized changes, keep diffs small, preserve each file’s existing line endings, and do not commit.
 
+## Senior-developer decision review
+
+For recommendations or changes that cross the device, server, database, and UI path:
+
+- Trace the real flow in source before choosing timing or behavior: device sampling, upload/poll cadence, server persistence, actuator command delivery, feedback reporting, and browser polling.
+- Distinguish a saved request from a command received by firmware, an output applied by hardware, and feedback reported to the UI. Do not describe one as proof of another.
+- Estimate best-case and worst-case synchronization delay from the actual intervals, request timeouts, and UI polling cadence. Include added server/database load when proposing more frequent requests.
+- Preserve firmware fail-safes, interlocks, run limits, and cooldowns. Do not change actuator safety timing just to make the UI appear faster; require hardware-specific reasoning and verification for such changes.
+- Check for stale or overlapping feedback, rapid conflicting user actions, and cases where the requested state differs from the physical state. Prefer clear pending/confirmed/timeout UI states; use command identifiers or versioned acknowledgements when state matching alone cannot confirm a particular command.
+- Reassess earlier advice against the code and correct it plainly when new evidence changes the recommendation. For ambiguous requests, explain the relevant distinction and ask only for a decision that materially changes the implementation.
+
 ## Repository safeguards
 
 - Never run state-changing Git commands, including add, commit, push, stash, reset, checkout, merge, rebase, or tag. Read-only Git is allowed.
