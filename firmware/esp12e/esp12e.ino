@@ -19,9 +19,11 @@ BioSync::LineBuffer incoming;
 BioSync::Reading reading = {0, 0};
 BioSync::OutputState outputState = {false, false};
 bool haveReading = false, haveOutputState = false, firstLogPending = true;
+bool outputStateReportPending = false;
 unsigned long lastReading = 0, lastOutputState = 0, lastPost = 0;
 unsigned long lastStatePost = 0, lastWiFiTry = 0, lastLoggedAt = 0;
 unsigned long lastFailSafe = 0;
+unsigned long outputStateVersion = 0;
 
 // Retain event subscriptions. Callbacks only record codes; print from loop().
 WiFiEventHandler disconnectedHandler, associatedHandler, dhcpTimeoutHandler;
@@ -195,6 +197,10 @@ void readUno() {
     (void)unoLink.available(); // Decode a finite snapshot with D6 detached.
     unoLink.flush();
     unoLink.println(F("ERR:LINK")); // Uno immediately applies its existing fail-safe.
+    if (!haveOutputState || outputState.fan || outputState.pump) {
+      outputStateReportPending = true;
+      ++outputStateVersion;
+    }
     outputState = {false, false};
     haveOutputState = true; // The Uno drops both outputs when this invalid frame is received.
     lastOutputState = millis();
@@ -231,9 +237,15 @@ void readUno() {
           Serial.println(F("[Uno] First valid readings received."));
         }
       } else if (BioSync::parseOutputState(incoming.data, state)) {
+        bool stateChanged = !haveOutputState
+            || state.fan != outputState.fan || state.pump != outputState.pump;
         outputState = state;
         haveOutputState = true;
         lastOutputState = millis();
+        if (stateChanged) {
+          outputStateReportPending = true;
+          ++outputStateVersion;
+        }
       } else if (strncmp(incoming.data, "ERR:", 4) == 0) {
         // Never POST the previous sample after the Uno reports a sensor/link fault.
         haveReading = false;
@@ -342,14 +354,14 @@ bool sendDataToServer(float temp, float hum, bool logReading) {
   return ok; // Successful POST is logged even if the serial link became stale.
 }
 
-void sendOutputStateToServer() {
+bool sendOutputStateToServer() {
   if (!haveOutputState || millis() - lastOutputState >= READING_TIMEOUT
-      || BIOSYNC_DEVICE_TOKEN[0] == '\0') return;
+      || BIOSYNC_DEVICE_TOKEN[0] == '\0') return false;
   BearSSL::WiFiClientSecure client;
   HTTPClient http;
   http.setTimeout(8000);
-  if (!configureVerifiedHTTPS(client)) return;
-  if (!http.begin(client, SERVER_URL)) return;
+  if (!configureVerifiedHTTPS(client)) return false;
+  if (!http.begin(client, SERVER_URL)) return false;
   http.addHeader("Content-Type", "application/x-www-form-urlencoded");
   http.addHeader("X-Device-Token", BIOSYNC_DEVICE_TOKEN);
   String body = "state_only=1&fan_actual=" + String(outputState.fan ? 1 : 0)
@@ -359,6 +371,7 @@ void sendOutputStateToServer() {
     Serial.print(F("[HTTP] Output-state update failed: ")); Serial.println(code);
   }
   http.end();
+  return code == HTTP_CODE_OK;
 }
 
 void setup() {
@@ -404,13 +417,29 @@ void loop() {
   if (freshReading() && now - lastPost >= POST_INTERVAL) {
     lastPost = now;
     bool logReading = firstLogPending || now - lastLoggedAt >= LOG_INTERVAL;
-    if (sendDataToServer(reading.temperature, reading.humidity, logReading) && logReading) {
-      firstLogPending = false;
-      lastLoggedAt = millis();
+    bool outputStateFresh = haveOutputState
+        && millis() - lastOutputState < READING_TIMEOUT;
+    unsigned long stateVersionAtRequest = outputStateVersion;
+    if (sendDataToServer(reading.temperature, reading.humidity, logReading)) {
+      if (logReading) {
+        firstLogPending = false;
+        lastLoggedAt = millis();
+      }
+      if (outputStateFresh && stateVersionAtRequest == outputStateVersion) {
+        outputStateReportPending = false;
+      }
     }
+  } else if (outputStateReportPending && haveOutputState
+      && millis() - lastOutputState < READING_TIMEOUT) {
+    // Report relay transitions immediately instead of waiting for the next
+    // regular sensor upload. This sends observed output state only; it does
+    // not change the Uno's actuator command or safety behavior.
+    outputStateReportPending = false;
+    lastStatePost = now;
+    (void)sendOutputStateToServer();
   } else if (!freshReading() && haveOutputState && now - lastStatePost >= POST_INTERVAL) {
     lastStatePost = now;
-    sendOutputStateToServer();
+    (void)sendOutputStateToServer();
   }
   yield();
 }
