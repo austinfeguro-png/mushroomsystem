@@ -36,6 +36,11 @@ function persistActuatorFeedback(PDO $pdo, int $fanState, int $pumpState, ?bool 
         $stmt = $pdo->prepare("UPDATE devices SET current_state = :val WHERE device_name = :name");
         $stmt->execute(['val' => $fanState, 'name' => 'Ventilation Fan']);
         $stmt->execute(['val' => $pumpState, 'name' => 'Water Pump']);
+        $controlStmt = $pdo->prepare("INSERT INTO system_controls (device_id, status, updated_at)
+            SELECT id, :status, NOW() FROM devices WHERE device_name = :device_name
+            ON DUPLICATE KEY UPDATE status = VALUES(status), updated_at = NOW()");
+        $controlStmt->execute(['status' => $fanState ? 'ON' : 'OFF', 'device_name' => 'Ventilation Fan']);
+        $controlStmt->execute(['status' => $pumpState ? 'ON' : 'OFF', 'device_name' => 'Water Pump']);
         $pdo->prepare("INSERT INTO system_settings (setting_key, setting_value)
             VALUES ('actuator_state_reported_at', :reported_at)
             ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)")
@@ -147,19 +152,25 @@ $MAX_HUM  = (float)($settings["{$stage}_max_hum"]  ?? 85.0);
 // ----------------------------------------------------------
 // Older firmware without `log` keeps the existing behavior.
 $shouldLog = !isset($_POST['log']) || (string)$_POST['log'] !== '0';
+$temperatureLogId = null;
+$humidityLogId = null;
 if ($shouldLog) {
     try {
-        $pdo->prepare("
+        $temperatureLogStmt = $pdo->prepare("
         INSERT INTO sensor_logs (device_id, recorded_value, recorded_at, stage)
         SELECT id, :val, NOW(), :stage FROM devices
         WHERE device_name = 'Temperature Node 1' LIMIT 1
-        ")->execute(['val' => $temperature, 'stage' => $stage]);
+        ");
+        $temperatureLogStmt->execute(['val' => $temperature, 'stage' => $stage]);
+        if ($temperatureLogStmt->rowCount() > 0) $temperatureLogId = (int)$pdo->lastInsertId();
 
-        $pdo->prepare("
+        $humidityLogStmt = $pdo->prepare("
         INSERT INTO sensor_logs (device_id, recorded_value, recorded_at, stage)
         SELECT id, :val, NOW(), :stage FROM devices
         WHERE device_name = 'Humidity Node 1' LIMIT 1
-        ")->execute(['val' => $humidity, 'stage' => $stage]);
+        ");
+        $humidityLogStmt->execute(['val' => $humidity, 'stage' => $stage]);
+        if ($humidityLogStmt->rowCount() > 0) $humidityLogId = (int)$pdo->lastInsertId();
     } catch (PDOException $e) {
         error_log("BioSync log error: " . $e->getMessage());
     }
@@ -275,12 +286,17 @@ if ($isAbnormal) {
                     : "Humidity exceeded maximum. Check the grow room and ventilation.";
             }
 
+            $sourceDeviceName = $isTemp ? 'Temperature Node 1' : 'Humidity Node 1';
+            $sourceSensorLogId = $isTemp ? $temperatureLogId : $humidityLogId;
+
             $pdo->prepare("
                 INSERT INTO notifications
-                    (title, description, message, type, icon_class, is_read, created_at)
-                VALUES
-                    (:title, :desc, :msg, 'alert', :icon, 0, NOW())
+                    (device_id, sensor_log_id, title, description, message, type, icon_class, is_read, created_at)
+                SELECT d.id, :sensor_log_id, :title, :desc, :msg, 'alert', :icon, 0, NOW()
+                FROM devices d WHERE d.device_name = :device_name
             ")->execute([
+                'sensor_log_id' => $sourceSensorLogId,
+                'device_name' => $sourceDeviceName,
                 'title' => $title,
                 'desc'  => $desc,
                 'msg'   => $condStr,

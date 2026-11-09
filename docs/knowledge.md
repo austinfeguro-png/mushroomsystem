@@ -9,7 +9,7 @@
 
 ## Database and Thresholds
 
-Import `biosync_db.sql` into MariaDB. `devices`, `sensor_logs`, `notifications`, `system_settings`, and `users` are the main tables. Device names are shared identifiers used by PHP and firmware. Thresholds are stage-specific keys in `system_settings`; update PHP and firmware behavior together if those rules change. Notification read state is global because the table has no per-user owner column.
+Import `biosync_db.sql` into MariaDB for a new database. Existing installations should apply `erd_relationships_migration.sql` once before deploying code that writes the new relationships. The schema includes `users`, `user_presence`, `devices`, `sensor_logs`, `notifications`, `system_controls`, and `system_settings`. Notification actor/source fields link user actions and device alerts; system controls link to devices and retain the last manual user; settings retain the last editing user. Existing test rows are attributed to the `SPECTRE` account by the migration. Device names remain firmware identifiers. Thresholds are stage-specific keys in `system_settings`; update PHP and firmware behavior together if those rules change. Notification read state remains global rather than per-user.
 
 ## Local Setup and Checks
 

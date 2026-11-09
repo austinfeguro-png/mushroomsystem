@@ -72,12 +72,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax_action'])) {
         // Load current stage to detect if it changed
         $curStage = $pdo->query("SELECT setting_value FROM system_settings WHERE setting_key='current_stage'")->fetchColumn();
 
-        $stmt = $pdo->prepare("INSERT INTO system_settings (setting_key, setting_value)
-            VALUES (:key, :val) ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)");
-        $stmt->execute(['key' => 'temperature_unit',    'val' => $tempUnit]);
-        $stmt->execute(['key' => 'email_notifications', 'val' => $emailNotif]);
-        $stmt->execute(['key' => 'active_ml_algorithm', 'val' => $newAlgo]);
-        $stmt->execute(['key' => 'current_stage',       'val' => $newStage]);
+        $stmt = $pdo->prepare("INSERT INTO system_settings (setting_key, setting_value, updated_by_user_id)
+            VALUES (:key, :val, :user_id)
+            ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_by_user_id = VALUES(updated_by_user_id)");
+        $stmt->execute(['key' => 'temperature_unit',    'val' => $tempUnit, 'user_id' => $_SESSION['user_id']]);
+        $stmt->execute(['key' => 'email_notifications', 'val' => $emailNotif, 'user_id' => $_SESSION['user_id']]);
+        $stmt->execute(['key' => 'active_ml_algorithm', 'val' => $newAlgo, 'user_id' => $_SESSION['user_id']]);
+        $stmt->execute(['key' => 'current_stage',       'val' => $newStage, 'user_id' => $_SESSION['user_id']]);
 
         // If stage changed, reset timer and log notification (same as dashboard.php)
         if ($curStage !== $newStage) {
@@ -86,8 +87,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax_action'])) {
             $stageLabel     = $stageLabelMap[$newStage] ?? ucfirst($newStage);
             $defaultDays    = $defaultDaysMap[$newStage] ?? 14;
 
-            $stmt->execute(['key' => 'stage_started_at',   'val' => date('Y-m-d H:i:s')]);
-            $stmt->execute(['key' => 'stage_expected_days','val' => $defaultDays]);
+            $stmt->execute(['key' => 'stage_started_at',   'val' => date('Y-m-d H:i:s'), 'user_id' => $_SESSION['user_id']]);
+            $stmt->execute(['key' => 'stage_expected_days','val' => $defaultDays, 'user_id' => $_SESSION['user_id']]);
 
             $pdo->exec("UPDATE notifications SET is_read = 1 WHERE type = 'stage_reminder'");
 
@@ -98,9 +99,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax_action'])) {
                 'fruiting'     => '24–28°C | 80–95% RH',
             ];
             $thresh = $stageThresholds[$newStage] ?? '';
-            $pdo->prepare("INSERT INTO notifications (title, description, message, type, icon_class, is_read, created_at)
-                VALUES (:title, :desc, :msg, 'info', 'fa-seedling', 0, NOW())")
+            $pdo->prepare("INSERT INTO notifications (action_by_user_id, title, description, message, type, icon_class, is_read, created_at)
+                VALUES (:user_id, :title, :desc, :msg, 'info', 'fa-seedling', 0, NOW())")
             ->execute([
+                'user_id' => $_SESSION['user_id'],
                 'title' => 'Stage Advanced',
                 'desc'  => "{$userName} confirmed stage transition to {$stageLabel}. New thresholds: {$thresh}.",
                 'msg'   => "System has advanced to {$stageLabel} stage.",

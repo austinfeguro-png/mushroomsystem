@@ -53,6 +53,9 @@ INSERT INTO `devices` (`id`, `device_name`, `current_state`, `unit`) VALUES
 
 CREATE TABLE `notifications` (
   `id` int(11) NOT NULL,
+  `action_by_user_id` int(11) DEFAULT NULL,
+  `device_id` int(11) DEFAULT NULL,
+  `sensor_log_id` int(11) DEFAULT NULL,
   `title` varchar(150) NOT NULL DEFAULT '',
   `description` text NOT NULL,
   `message` text NOT NULL,
@@ -66,12 +69,12 @@ CREATE TABLE `notifications` (
 -- Dumping data for table `notifications`
 --
 
-INSERT INTO `notifications` (`id`, `title`, `description`, `message`, `type`, `icon_class`, `is_read`, `created_at`) VALUES
-(1, 'System Online', 'Bio-Sync monitoring system started successfully.', 'System Online', 'info', 'fa-circle-check', 1, '2026-06-01 07:01:18'),
-(2, 'Sensor Data Received', 'Latest temperature and humidity readings logged.', 'Sensor Data Received', 'info', 'fa-microchip', 0, '2026-06-01 08:31:18'),
-(3, 'High Temperature', 'Temperature exceeded 30°C threshold. Fan activated.', 'High Temperature Alert', 'alert', 'fa-triangle-exclamation', 0, '2026-06-01 08:51:18'),
-(4, 'Low Humidity', 'Humidity dropped below 85%. Water pump activated.', 'Low Humidity Alert', 'alert', 'fa-droplet', 0, '2026-06-01 08:56:18'),
-(48, 'High Humidity', 'Humidity exceeded 90%. Ventilation activated.', 'Humidity exceeded 90%. Ventilation activated.', 'alert', 'fa-droplet', 0, '2026-06-02 06:23:48');
+INSERT INTO `notifications` (`id`, `action_by_user_id`, `device_id`, `sensor_log_id`, `title`, `description`, `message`, `type`, `icon_class`, `is_read`, `created_at`) VALUES
+(1, NULL, NULL, NULL, 'System Online', 'Bio-Sync monitoring system started successfully.', 'System Online', 'info', 'fa-circle-check', 1, '2026-06-01 07:01:18'),
+(2, NULL, NULL, NULL, 'Sensor Data Received', 'Latest temperature and humidity readings logged.', 'Sensor Data Received', 'info', 'fa-microchip', 0, '2026-06-01 08:31:18'),
+(3, NULL, 1, NULL, 'High Temperature', 'Temperature exceeded 30°C threshold. Fan activated.', 'High Temperature Alert', 'alert', 'fa-triangle-exclamation', 0, '2026-06-01 08:51:18'),
+(4, NULL, 2, NULL, 'Low Humidity', 'Humidity dropped below 85%. Water pump activated.', 'Low Humidity Alert', 'alert', 'fa-droplet', 0, '2026-06-01 08:56:18'),
+(48, NULL, 2, NULL, 'High Humidity', 'Humidity exceeded 90%. Ventilation activated.', 'Humidity exceeded 90%. Ventilation activated.', 'alert', 'fa-droplet', 0, '2026-06-02 06:23:48');
 
 -- --------------------------------------------------------
 
@@ -249,7 +252,8 @@ INSERT INTO `sensor_logs` (`id`, `device_id`, `recorded_value`, `recorded_at`, `
 
 CREATE TABLE `system_controls` (
   `id` int(11) NOT NULL,
-  `device_name` varchar(50) NOT NULL,
+  `device_id` int(11) NOT NULL,
+  `changed_by_user_id` int(11) DEFAULT NULL,
   `status` varchar(10) NOT NULL DEFAULT 'OFF',
   `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
@@ -258,9 +262,9 @@ CREATE TABLE `system_controls` (
 -- Dumping data for table `system_controls`
 --
 
-INSERT INTO `system_controls` (`id`, `device_name`, `status`, `updated_at`) VALUES
-(1, 'pump', 'OFF', '2026-05-25 08:38:06'),
-(2, 'fan', 'OFF', '2026-05-25 08:38:06');
+INSERT INTO `system_controls` (`id`, `device_id`, `changed_by_user_id`, `status`, `updated_at`) VALUES
+(1, 4, 3, 'OFF', '2026-05-25 08:38:06'),
+(2, 3, 3, 'OFF', '2026-05-25 08:38:06');
 
 -- --------------------------------------------------------
 
@@ -270,7 +274,8 @@ INSERT INTO `system_controls` (`id`, `device_name`, `status`, `updated_at`) VALU
 
 CREATE TABLE `system_settings` (
   `setting_key` varchar(50) NOT NULL,
-  `setting_value` varchar(100) NOT NULL
+  `setting_value` varchar(100) NOT NULL,
+  `updated_by_user_id` int(11) DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 --
@@ -355,6 +360,9 @@ INSERT INTO `users` (`id`, `full_name`, `username`, `password_hash`, `status`, `
 (3, 'Admin Austin', 'SPECTRE', '$2y$10$xyYlxr8ud/VsHiAsVMav5.pR1D3iC6Fp5Lx6TzI2lb6sq35R38r/u', 'Active', 'admin', '09065605274', NULL),
 (4, 'Kent Erwin Camiling', 'kent', '$2y$10$mqoSAz2yjNHq/MJ1a8cvAOpYJs4tG8Ke19YbMsJ.Mg.RdqyBb89CW', 'Active', 'user', '09151877379', NULL);
 
+-- Existing test settings were maintained by the SPECTRE test account.
+UPDATE `system_settings` SET `updated_by_user_id` = 3;
+
 --
 -- Indexes for dumped tables
 --
@@ -370,7 +378,10 @@ ALTER TABLE `devices`
 -- Indexes for table `notifications`
 --
 ALTER TABLE `notifications`
-  ADD PRIMARY KEY (`id`);
+  ADD PRIMARY KEY (`id`),
+  ADD KEY `idx_notifications_actor` (`action_by_user_id`),
+  ADD KEY `idx_notifications_device` (`device_id`),
+  ADD KEY `idx_notifications_sensor_log` (`sensor_log_id`);
 
 --
 -- Indexes for table `sensor_logs`
@@ -385,13 +396,15 @@ ALTER TABLE `sensor_logs`
 --
 ALTER TABLE `system_controls`
   ADD PRIMARY KEY (`id`),
-  ADD UNIQUE KEY `device_name` (`device_name`);
+  ADD UNIQUE KEY `device_id` (`device_id`),
+  ADD KEY `idx_system_controls_changed_by` (`changed_by_user_id`);
 
 --
 -- Indexes for table `system_settings`
 --
 ALTER TABLE `system_settings`
-  ADD PRIMARY KEY (`setting_key`);
+  ADD PRIMARY KEY (`setting_key`),
+  ADD KEY `idx_system_settings_updated_by` (`updated_by_user_id`);
 
 --
 -- Indexes for table `users`
@@ -443,6 +456,27 @@ ALTER TABLE `users`
 --
 ALTER TABLE `sensor_logs`
   ADD CONSTRAINT `sensor_logs_ibfk_1` FOREIGN KEY (`device_id`) REFERENCES `devices` (`id`) ON DELETE CASCADE;
+
+--
+-- Constraints for table `notifications`
+--
+ALTER TABLE `notifications`
+  ADD CONSTRAINT `notifications_ibfk_actor` FOREIGN KEY (`action_by_user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL,
+  ADD CONSTRAINT `notifications_ibfk_device` FOREIGN KEY (`device_id`) REFERENCES `devices` (`id`) ON DELETE SET NULL,
+  ADD CONSTRAINT `notifications_ibfk_sensor_log` FOREIGN KEY (`sensor_log_id`) REFERENCES `sensor_logs` (`id`) ON DELETE SET NULL;
+
+--
+-- Constraints for table `system_controls`
+--
+ALTER TABLE `system_controls`
+  ADD CONSTRAINT `system_controls_ibfk_device` FOREIGN KEY (`device_id`) REFERENCES `devices` (`id`) ON DELETE CASCADE,
+  ADD CONSTRAINT `system_controls_ibfk_user` FOREIGN KEY (`changed_by_user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL;
+
+--
+-- Constraints for table `system_settings`
+--
+ALTER TABLE `system_settings`
+  ADD CONSTRAINT `system_settings_ibfk_user` FOREIGN KEY (`updated_by_user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL;
 
 --
 -- Constraints for table `user_presence`

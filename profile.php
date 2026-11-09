@@ -88,12 +88,13 @@ if ($isAjax) {
         try {
             $curStage = $pdo->query("SELECT setting_value FROM system_settings WHERE setting_key='current_stage'")->fetchColumn();
 
-            $stmt = $pdo->prepare("INSERT INTO system_settings (setting_key, setting_value)
-                VALUES (:key, :val) ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)");
-            $stmt->execute(['key' => 'temperature_unit',    'val' => $tempUnit]);
-            $stmt->execute(['key' => 'email_notifications', 'val' => $emailNotif]);
-            $stmt->execute(['key' => 'active_ml_algorithm', 'val' => $newAlgo]);
-            $stmt->execute(['key' => 'current_stage',       'val' => $newStage]);
+            $stmt = $pdo->prepare("INSERT INTO system_settings (setting_key, setting_value, updated_by_user_id)
+                VALUES (:key, :val, :user_id)
+                ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_by_user_id = VALUES(updated_by_user_id)");
+            $stmt->execute(['key' => 'temperature_unit',    'val' => $tempUnit, 'user_id' => $userId]);
+            $stmt->execute(['key' => 'email_notifications', 'val' => $emailNotif, 'user_id' => $userId]);
+            $stmt->execute(['key' => 'active_ml_algorithm', 'val' => $newAlgo, 'user_id' => $userId]);
+            $stmt->execute(['key' => 'current_stage',       'val' => $newStage, 'user_id' => $userId]);
 
             if ($curStage !== $newStage) {
                 $stageLabelMap  = ['colonization'=>'Colonization','pinning'=>'Pinning Initiation','fruiting'=>'Fruiting'];
@@ -101,14 +102,15 @@ if ($isAjax) {
                 $thresholds     = ['colonization'=>'24–28°C | 70–85% RH','pinning'=>'18–24°C | 85–95% RH','fruiting'=>'24–28°C | 80–95% RH'];
                 $stageLabel     = $stageLabelMap[$newStage];
 
-                $stmt->execute(['key' => 'stage_started_at',    'val' => date('Y-m-d H:i:s')]);
-                $stmt->execute(['key' => 'stage_expected_days', 'val' => $defaultDaysMap[$newStage]]);
+                $stmt->execute(['key' => 'stage_started_at',    'val' => date('Y-m-d H:i:s'), 'user_id' => $userId]);
+                $stmt->execute(['key' => 'stage_expected_days', 'val' => $defaultDaysMap[$newStage], 'user_id' => $userId]);
 
                 $pdo->exec("UPDATE notifications SET is_read = 1 WHERE type = 'stage_reminder'");
 
-                $pdo->prepare("INSERT INTO notifications (title, description, message, type, icon_class, is_read, created_at)
-                    VALUES (:title, :desc, :msg, 'info', 'fa-seedling', 0, NOW())")
+                $pdo->prepare("INSERT INTO notifications (action_by_user_id, title, description, message, type, icon_class, is_read, created_at)
+                    VALUES (:user_id, :title, :desc, :msg, 'info', 'fa-seedling', 0, NOW())")
                     ->execute([
+                        'user_id' => $userId,
                         'title' => 'Stage Advanced',
                         'desc'  => ($_SESSION['user_name'] ?? 'Admin') . " confirmed stage transition to {$stageLabel}. New thresholds: {$thresholds[$newStage]}.",
                         'msg'   => "System has advanced to {$stageLabel} stage.",

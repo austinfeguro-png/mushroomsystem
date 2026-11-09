@@ -44,10 +44,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax_action'])) {
             exit();
         }
         $prefix = $deviceName === 'Ventilation Fan' ? 'fan' : 'pump';
-        $stmt = $pdo->prepare("INSERT INTO system_settings (setting_key, setting_value)
-            VALUES (:key, :val) ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)");
-        $stmt->execute(['key' => $prefix . '_control_mode', 'val' => 'manual']);
-        $stmt->execute(['key' => $prefix . '_manual_state', 'val' => (string)$newState]);
+        $stmt = $pdo->prepare("INSERT INTO system_settings (setting_key, setting_value, updated_by_user_id)
+            VALUES (:key, :val, :user_id)
+            ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_by_user_id = VALUES(updated_by_user_id)");
+        $stmt->execute(['key' => $prefix . '_control_mode', 'val' => 'manual', 'user_id' => $userId]);
+        $stmt->execute(['key' => $prefix . '_manual_state', 'val' => (string)$newState, 'user_id' => $userId]);
+        $pdo->prepare("INSERT INTO system_controls (device_id, changed_by_user_id, status, updated_at)
+            SELECT id, :user_id, :status, NOW() FROM devices WHERE device_name = :device_name
+            ON DUPLICATE KEY UPDATE changed_by_user_id = VALUES(changed_by_user_id), status = VALUES(status), updated_at = NOW()")
+            ->execute(['user_id' => $userId, 'status' => $newState ? 'ON' : 'OFF', 'device_name' => $deviceName]);
         echo json_encode(['success' => true, 'device' => $deviceName, 'state' => $newState, 'mode' => 'manual']);
         exit();
     }
@@ -59,9 +64,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax_action'])) {
             exit();
         }
         $prefix = $deviceName === 'Ventilation Fan' ? 'fan' : 'pump';
-        $stmt = $pdo->prepare("INSERT INTO system_settings (setting_key, setting_value)
-            VALUES (:key, 'auto') ON DUPLICATE KEY UPDATE setting_value = 'auto'");
-        $stmt->execute(['key' => $prefix . '_control_mode']);
+        $stmt = $pdo->prepare("INSERT INTO system_settings (setting_key, setting_value, updated_by_user_id)
+            VALUES (:key, 'auto', :user_id)
+            ON DUPLICATE KEY UPDATE setting_value = 'auto', updated_by_user_id = VALUES(updated_by_user_id)");
+        $stmt->execute(['key' => $prefix . '_control_mode', 'user_id' => $userId]);
+        $pdo->prepare("INSERT INTO system_controls (device_id, changed_by_user_id, status, updated_at)
+            SELECT id, :user_id, IF(current_state = '1', 'ON', 'OFF'), NOW()
+            FROM devices WHERE device_name = :device_name
+            ON DUPLICATE KEY UPDATE changed_by_user_id = VALUES(changed_by_user_id), updated_at = NOW()")
+            ->execute(['user_id' => $userId, 'device_name' => $deviceName]);
         echo json_encode(['success' => true, 'device' => $deviceName, 'mode' => 'auto']);
         exit();
     }
@@ -80,13 +91,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax_action'])) {
         $curStageStmt = $pdo->query("SELECT setting_value FROM system_settings WHERE setting_key='current_stage'");
         $curStage     = $curStageStmt->fetchColumn();
 
-        $stmt = $pdo->prepare("INSERT INTO system_settings (setting_key, setting_value)
-            VALUES (:key, :val)
-            ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)");
-        $stmt->execute(['key' => 'temperature_unit',    'val' => $tempUnit]);
-        $stmt->execute(['key' => 'email_notifications', 'val' => $emailNotif]);
-        $stmt->execute(['key' => 'active_ml_algorithm', 'val' => $newAlgo]);
-        $stmt->execute(['key' => 'current_stage',       'val' => $newStage]);
+        $stmt = $pdo->prepare("INSERT INTO system_settings (setting_key, setting_value, updated_by_user_id)
+            VALUES (:key, :val, :user_id)
+            ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_by_user_id = VALUES(updated_by_user_id)");
+        $stmt->execute(['key' => 'temperature_unit',    'val' => $tempUnit, 'user_id' => $userId]);
+        $stmt->execute(['key' => 'email_notifications', 'val' => $emailNotif, 'user_id' => $userId]);
+        $stmt->execute(['key' => 'active_ml_algorithm', 'val' => $newAlgo, 'user_id' => $userId]);
+        $stmt->execute(['key' => 'current_stage',       'val' => $newStage, 'user_id' => $userId]);
 
         // If stage changed, reset timer and log notification
         if ($curStage !== $newStage) {
@@ -95,8 +106,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax_action'])) {
             $stageLabel    = $stageLabelMap[$newStage] ?? ucfirst($newStage);
             $defaultDays   = $defaultDaysMap[$newStage] ?? 14;
 
-            $stmt->execute(['key' => 'stage_started_at',   'val' => date('Y-m-d H:i:s')]);
-            $stmt->execute(['key' => 'stage_expected_days','val' => $defaultDays]);
+            $stmt->execute(['key' => 'stage_started_at',   'val' => date('Y-m-d H:i:s'), 'user_id' => $userId]);
+            $stmt->execute(['key' => 'stage_expected_days','val' => $defaultDays, 'user_id' => $userId]);
 
             // Resolve the previous reminder but retain it in notification history.
             $pdo->exec("UPDATE notifications SET is_read = 1 WHERE type = 'stage_reminder'");
@@ -109,9 +120,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax_action'])) {
                 'fruiting'     => '24–28°C | 80–95% RH',
             ];
             $thresh = $stageThresholds[$newStage] ?? '';
-            $pdo->prepare("INSERT INTO notifications (title, description, message, type, icon_class, is_read, created_at)
-                VALUES (:title, :desc, :msg, 'info', 'fa-seedling', 0, NOW())")
+            $pdo->prepare("INSERT INTO notifications (action_by_user_id, title, description, message, type, icon_class, is_read, created_at)
+                VALUES (:user_id, :title, :desc, :msg, 'info', 'fa-seedling', 0, NOW())")
             ->execute([
+                'user_id' => $userId,
                 'title' => 'Stage Advanced',
                 'desc'  => "{$userName} confirmed stage transition to {$stageLabel}. New thresholds: {$thresh}.",
                 'msg'   => "System has advanced to {$stageLabel} stage.",
@@ -131,19 +143,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax_action'])) {
         $curStage      = $curStageStmt->fetchColumn();
         $stageLabel    = $stageLabelMap[$curStage] ?? ucfirst($curStage);
 
-        $stmt = $pdo->prepare("INSERT INTO system_settings (setting_key, setting_value)
-            VALUES (:key, :val) ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)");
-        $stmt->execute(['key' => 'stage_started_at',    'val' => date('Y-m-d H:i:s')]);
-        $stmt->execute(['key' => 'stage_expected_days', 'val' => $extendDays]);
+        $stmt = $pdo->prepare("INSERT INTO system_settings (setting_key, setting_value, updated_by_user_id)
+            VALUES (:key, :val, :user_id)
+            ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_by_user_id = VALUES(updated_by_user_id)");
+        $stmt->execute(['key' => 'stage_started_at',    'val' => date('Y-m-d H:i:s'), 'user_id' => $userId]);
+        $stmt->execute(['key' => 'stage_expected_days', 'val' => $extendDays, 'user_id' => $userId]);
 
         // Mark existing reminder as read
         $pdo->query("UPDATE notifications SET is_read=1 WHERE type='stage_reminder'");
 
         // Log extension
         $userName = $_SESSION['user_name'] ?? 'Admin';
-        $pdo->prepare("INSERT INTO notifications (title, description, message, type, icon_class, is_read, created_at)
-            VALUES (:title, :desc, :msg, 'info', 'fa-clock', 0, NOW())")
+        $pdo->prepare("INSERT INTO notifications (action_by_user_id, title, description, message, type, icon_class, is_read, created_at)
+            VALUES (:user_id, :title, :desc, :msg, 'info', 'fa-clock', 0, NOW())")
         ->execute([
+            'user_id' => $userId,
             'title' => 'Stage Extended',
             'desc'  => "{$userName} extended {$stageLabel} by {$extendDays} days. Next check scheduled in {$extendDays} days.",
             'msg'   => "{$stageLabel} extended by {$extendDays} days.",
@@ -169,14 +183,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax_action'])) {
         $previousDay = ($stageStartedAt !== '' && strtotime($stageStartedAt) !== false)
             ? max(0, (int)floor((time() - strtotime($stageStartedAt)) / 86400)) : 0;
         $newStartedAt = date('Y-m-d H:i:s', time() - ($requestedDay * 86400));
-        $saveStartedAt = $pdo->prepare("INSERT INTO system_settings (setting_key, setting_value)
-            VALUES ('stage_started_at', :started_at)
-            ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)");
-        $saveStartedAt->execute(['started_at' => $newStartedAt]);
+        $saveStartedAt = $pdo->prepare("INSERT INTO system_settings (setting_key, setting_value, updated_by_user_id)
+            VALUES ('stage_started_at', :started_at, :user_id)
+            ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_by_user_id = VALUES(updated_by_user_id)");
+        $saveStartedAt->execute(['started_at' => $newStartedAt, 'user_id' => $userId]);
         $userName = $_SESSION['user_name'] ?? 'Admin';
-        $pdo->prepare("INSERT INTO notifications (title, description, message, type, icon_class, is_read, created_at)
-            VALUES ('Stage Progress Adjusted', :description, :message, 'info', 'fa-calendar-day', 0, NOW())")
+        $pdo->prepare("INSERT INTO notifications (action_by_user_id, title, description, message, type, icon_class, is_read, created_at)
+            VALUES (:user_id, 'Stage Progress Adjusted', :description, :message, 'info', 'fa-calendar-day', 0, NOW())")
             ->execute([
+                'user_id' => $userId,
                 'description' => "{$userName} adjusted stage progress from day {$previousDay} to day {$requestedDay}.",
                 'message' => "Stage progress adjusted to day {$requestedDay}.",
             ]);
