@@ -225,22 +225,27 @@ $alertTriggered     = false;
 $abnormalConditions = [];
 $conditionString    = '';
 
-// Read latest sensor values from sensor_logs (same pattern as dashboard)
-$tempStmt    = $pdo->query("SELECT recorded_value FROM sensor_logs WHERE device_id = (SELECT id FROM devices WHERE device_name = 'Temperature Node 1' LIMIT 1) ORDER BY recorded_at DESC LIMIT 1");
-$liveTemp    = (float)$tempStmt->fetchColumn();
+$sensorReportedAt = (int)($settings['sensor_reading_reported_at'] ?? 0);
+$sensorDataAge = $sensorReportedAt > 0 ? max(0, time() - $sensorReportedAt) : null;
+$sensorDataFresh = ($settings['sensor_reading_valid'] ?? '0') === '1'
+    && $sensorDataAge !== null && $sensorDataAge <= 30;
 
-$humStmt     = $pdo->query("SELECT recorded_value FROM sensor_logs WHERE device_id = (SELECT id FROM devices WHERE device_name = 'Humidity Node 1' LIMIT 1) ORDER BY recorded_at DESC LIMIT 1");
-$liveHum     = (float)$humStmt->fetchColumn();
+// Match the dashboard's live values and freshness rule; chart history may be old.
+$deviceStmt = $pdo->query("SELECT device_name, current_state FROM devices
+    WHERE device_name IN ('Temperature Node 1', 'Humidity Node 1')");
+$liveDevices = $deviceStmt->fetchAll(PDO::FETCH_KEY_PAIR);
+$liveTemp = (float)($liveDevices['Temperature Node 1'] ?? 0);
+$liveHum = (float)($liveDevices['Humidity Node 1'] ?? 0);
 
-if ($liveTemp > $MAX_TEMP) {
+if ($sensorDataFresh && $liveTemp > $MAX_TEMP) {
     $abnormalConditions[] = "Temperature is {$liveTemp}°{$TEMP_UNIT} (Max: {$MAX_TEMP}°{$TEMP_UNIT})";
     $alertTriggered = true;
 }
-if ($liveTemp < $MIN_TEMP) {
+if ($sensorDataFresh && $liveTemp < $MIN_TEMP) {
     $abnormalConditions[] = "Temperature is {$liveTemp}°{$TEMP_UNIT} (Min: {$MIN_TEMP}°{$TEMP_UNIT})";
     $alertTriggered = true;
 }
-if ($liveHum < $MIN_HUM || $liveHum > $MAX_HUM) {
+if ($sensorDataFresh && ($liveHum < $MIN_HUM || $liveHum > $MAX_HUM)) {
     $abnormalConditions[] = "Humidity is {$liveHum}% (Allowed: {$MIN_HUM}%–{$MAX_HUM}%)";
     $alertTriggered = true;
 }
@@ -966,13 +971,17 @@ if ($alertTriggered) {
         <!-- PAGE BODY -->
         <div class="page-body">
 
-            <!-- ALERT BANNER -->
-            <?php if ($alertTriggered): ?>
-            <div class="alert-banner">
-                <i class="fa-solid fa-triangle-exclamation"></i>
-                <div><strong>ALERT:</strong> <?php echo $conditionString; ?>. Auto-systems started.</div>
+            <div class="alert-banner" id="sensorStaleBanner" role="status"
+                 style="display:<?php echo $sensorDataFresh ? 'none' : 'flex'; ?>;background:#fff7ed;border-color:#f59e0b;color:#92400e;">
+                <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+                <div>No recent sensor reading. Displayed values may be stale; actuator control is in its fail-safe state.</div>
             </div>
-            <?php endif; ?>
+
+            <!-- ALERT BANNER -->
+            <div class="alert-banner" id="alertBanner" role="status" style="display:<?php echo $alertTriggered ? 'flex' : 'none'; ?>;">
+                <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+                <div id="alertBannerText"><strong>ALERT:</strong> <?php echo $conditionString; ?>. Auto-systems started.</div>
+            </div>
 
             <!-- FILTER CONTROLS -->
             <div class="card">
@@ -1530,6 +1539,34 @@ async function refreshHistory(url = new URL(window.location.href), applyingFilte
         if (historyRequest === controller) historyRequest = null;
     }
 }
+
+function updateHistoricalSensorStatus() {
+    fetch('live_data.php', { cache: 'no-store' })
+        .then(response => response.ok ? response.json() : Promise.reject())
+        .then(data => {
+            const staleBanner = document.getElementById('sensorStaleBanner');
+            const alertBanner = document.getElementById('alertBanner');
+            const alertText = document.getElementById('alertBannerText');
+            const isFresh = data.sensorDataFresh === true;
+            if (staleBanner) staleBanner.style.display = isFresh ? 'none' : 'flex';
+
+            const isAbnormal = isFresh && (data.tempAbove || data.tempBelow || data.humAbove || data.humBelow);
+            if (!alertBanner) return;
+            alertBanner.style.display = isAbnormal ? 'flex' : 'none';
+            if (!isAbnormal || !alertText) return;
+
+            const messages = [];
+            if (data.tempAbove) messages.push('Temperature is ' + data.temperature + '°' + data.tempUnit + ' (Max: ' + data.stageMaxTemp + '°' + data.tempUnit + ')');
+            if (data.tempBelow) messages.push('Temperature is ' + data.temperature + '°' + data.tempUnit + ' (Min: ' + data.stageMinTemp + '°' + data.tempUnit + ')');
+            if (data.humAbove) messages.push('Humidity is ' + data.humidity + '% (Max: ' + data.stageMaxHum + '%)');
+            if (data.humBelow) messages.push('Humidity is ' + data.humidity + '% (Min: ' + data.stageMinHum + '%)');
+            alertText.textContent = 'ALERT: ' + messages.join(' & ') + '. Auto-systems started.';
+        })
+        .catch(() => {});
+}
+
+updateHistoricalSensorStatus();
+setInterval(updateHistoricalSensorStatus, 5000);
 setInterval(() => refreshHistory(), 5000);
 </script>
 <script>

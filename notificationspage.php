@@ -150,25 +150,30 @@ $TEMP_UNIT = isset($settings['temperature_unit'])? $settings['temperature_unit']
 $EMAIL_NOTIF = isset($settings['email_notifications']) ? $settings['email_notifications'] : '1';
 $activeAlgo = $settings['active_ml_algorithm'] ?? 'Random Forest';
 
-$tempStmt    = $pdo->query("SELECT recorded_value FROM sensor_logs WHERE device_id = (SELECT id FROM devices WHERE device_name = 'Temperature Node 1' LIMIT 1) ORDER BY recorded_at DESC LIMIT 1");
+$tempStmt    = $pdo->query("SELECT current_state FROM devices WHERE device_name = 'Temperature Node 1'");
 $temperature = (float)$tempStmt->fetchColumn();
 
-$humStmt  = $pdo->query("SELECT recorded_value FROM sensor_logs WHERE device_id = (SELECT id FROM devices WHERE device_name = 'Humidity Node 1' LIMIT 1) ORDER BY recorded_at DESC LIMIT 1");
+$humStmt  = $pdo->query("SELECT current_state FROM devices WHERE device_name = 'Humidity Node 1'");
 $humidity = (float)$humStmt->fetchColumn();
+
+$sensorReportedAt = (int)($settings['sensor_reading_reported_at'] ?? 0);
+$sensorDataAge = $sensorReportedAt > 0 ? max(0, time() - $sensorReportedAt) : null;
+$sensorDataFresh = ($settings['sensor_reading_valid'] ?? '0') === '1'
+    && $sensorDataAge !== null && $sensorDataAge <= 30;
 
 $alertTriggered     = false;
 $abnormalConditions = [];
 $conditionString    = '';
 
-if ($temperature > $MAX_TEMP) {
+if ($sensorDataFresh && $temperature > $MAX_TEMP) {
     $abnormalConditions[] = "Temperature is {$temperature}°{$TEMP_UNIT} (Max: {$MAX_TEMP}°{$TEMP_UNIT})";
     $alertTriggered = true;
 }
-if ($temperature < $MIN_TEMP) {
+if ($sensorDataFresh && $temperature < $MIN_TEMP) {
     $abnormalConditions[] = "Temperature is {$temperature}°{$TEMP_UNIT} (Min: {$MIN_TEMP}°{$TEMP_UNIT})";
     $alertTriggered = true;
 }
-if ($humidity < $MIN_HUM || $humidity > $MAX_HUM) {
+if ($sensorDataFresh && ($humidity < $MIN_HUM || $humidity > $MAX_HUM)) {
     if ($humidity < $MIN_HUM) $abnormalConditions[] = "Humidity is LOW: {$humidity}% (Min: {$MIN_HUM}%)";
     if ($humidity > $MAX_HUM) $abnormalConditions[] = "Humidity is HIGH: {$humidity}% (Max: {$MAX_HUM}%)";
     $alertTriggered = true;
@@ -869,6 +874,12 @@ foreach ($notifications as $n) {
         <!-- PAGE BODY -->
         <div class="page-body">
 
+            <div class="alert-banner" id="sensorStaleBanner" role="status"
+                 style="display:<?php echo $sensorDataFresh ? 'none' : 'flex'; ?>;background:#fff7ed;border-color:#f59e0b;color:#92400e;">
+                <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+                <div>No recent sensor reading. Displayed values may be stale; actuator control is in its fail-safe state.</div>
+            </div>
+
             <!-- ALERT BANNER -->
             <div class="alert-banner" id="alertBanner" style="display:<?php echo $alertTriggered ? 'flex' : 'none'; ?>;">
                 <i class="fa-solid fa-triangle-exclamation" style="flex-shrink:0;"></i>
@@ -1346,11 +1357,15 @@ function updateNotifPage() {
         .then(d => {
             const banner     = document.getElementById('alertBanner');
             const bannerText = document.getElementById('alertBannerText');
-            const isAbnormal = d.tempAbove || d.humAbove || d.humBelow;
+            const staleBanner = document.getElementById('sensorStaleBanner');
+            if (staleBanner) staleBanner.style.display = d.sensorDataFresh ? 'none' : 'flex';
+            const isAbnormal = d.sensorDataFresh
+                && (d.tempAbove || d.tempBelow || d.humAbove || d.humBelow);
             if (banner) {
                 if (isAbnormal) {
                     const msgs = [];
                     if (d.tempAbove) msgs.push('Temperature is ' + d.temperature + '°' + d.tempUnit + ' (Limit: ' + d.MAX_TEMP + '°' + d.tempUnit + ')');
+                    if (d.tempBelow) msgs.push('Temperature is ' + d.temperature + '°' + d.tempUnit + ' (Min: ' + d.MIN_TEMP + '°' + d.tempUnit + ')');
                     if (d.humAbove)  msgs.push('Humidity is HIGH: ' + d.humidity + '% (Max: ' + d.MAX_HUM + '%)');
                     if (d.humBelow)  msgs.push('Humidity is LOW: '  + d.humidity + '% (Min: ' + d.MIN_HUM + '%)');
                     if (bannerText) bannerText.innerHTML =
