@@ -69,7 +69,8 @@ function markSensorReadingInvalid(PDO $pdo): void {
 }
 
 // A sensor fault can still leave the Uno with a known safe output state.
-// Accept that actuator feedback without refreshing sensor values or logs.
+// Accept actuator feedback without refreshing sensor values, validity, or logs;
+// the sensor timestamp/freshness window controls when the UI reports stale data.
 if (isset($_POST['state_only']) && (string)$_POST['state_only'] === '1') {
     $fanActual = $_POST['fan_actual'] ?? null;
     $pumpActual = $_POST['pump_actual'] ?? null;
@@ -80,7 +81,7 @@ if (isset($_POST['state_only']) && (string)$_POST['state_only'] === '1') {
         exit;
     }
     try {
-        persistActuatorFeedback($pdo, (int)$fanActual, (int)$pumpActual, false);
+        persistActuatorFeedback($pdo, (int)$fanActual, (int)$pumpActual);
     } catch (Throwable $e) {
         error_log("BioSync actuator feedback error: " . $e->getMessage());
         http_response_code(500);
