@@ -37,6 +37,23 @@ def database_config():
     config = {key: os.environ.get(prefix + suffix, '').strip()
               for key, suffix in names.items()}
 
+    port_value = os.environ.get(prefix + 'PORT', '3306').strip()
+    try:
+        port = int(port_value)
+    except ValueError:
+        raise SystemExit(prefix + 'PORT must be a number between 1 and 65535.')
+    if not 1 <= port <= 65535:
+        raise SystemExit(prefix + 'PORT must be a number between 1 and 65535.')
+    config['port'] = port
+
+    ssl_ca = os.environ.get(prefix + 'SSL_CA', '').strip()
+    if profile == 'online':
+        if not ssl_ca:
+            raise SystemExit('Set ' + prefix + 'SSL_CA to the Aiven CA certificate path.')
+        if not Path(ssl_ca).is_file():
+            raise SystemExit(prefix + 'SSL_CA does not point to an existing file.')
+        config.update(ssl_ca=ssl_ca, ssl_verify_cert=True, ssl_verify_identity=True)
+
     if profile == 'local':
         php_config_path = Path(__file__).resolve().parent.parent / 'config.php'
         if php_config_path.is_file():
@@ -78,7 +95,7 @@ try:
     print("      Connected.")
 except mysql.connector.Error as e:
     print(f"      FAILED: {e}")
-    print("      Make sure XAMPP MySQL is running.")
+    print("      Check the selected database profile, network access, port, and TLS certificate.")
     exit(1)
 
 # ----------------------------------------------------------
