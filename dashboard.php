@@ -1704,6 +1704,7 @@ let pendingToggle   = false;   // blocks auto-refresh during device toggles
 let pendingSettings = false;   // blocks auto-refresh during settings save
 let deviceControlVersion = 0;
 let liveDataSequence = 0;
+let lastMlPredictionKey = null;
 
 function showFeedback(feedbackId, message, type) {
     const el = document.getElementById(feedbackId);
@@ -2231,11 +2232,16 @@ function updateLiveData() {
                 if (d.sensorDataFresh) {
                     const algo = encodeURIComponent(d.activeAlgo || 'Random Forest');
                     const stg  = encodeURIComponent(d.stage || 'fruiting');
-                    fetch('biosync_ml/ml_widget.php?temp=' + d.temperature + '&hum=' + d.humidity + '&algo=' + algo + '&stage=' + stg)
-                        .then(r => r.text())
-                        .then(html => { if (html && html.trim()) mlCard.innerHTML = html; })
-                        .catch(() => {});
+                    const predictionKey = [d.temperature, d.humidity, d.activeAlgo, d.stage].join('|');
+                    if (predictionKey !== lastMlPredictionKey) {
+                        lastMlPredictionKey = predictionKey;
+                        fetch('biosync_ml/ml_widget.php?temp=' + d.temperature + '&hum=' + d.humidity + '&algo=' + algo + '&stage=' + stg)
+                            .then(r => r.text())
+                            .then(html => { if (html && html.trim()) mlCard.innerHTML = html; })
+                            .catch(() => {});
+                    }
                 } else {
+                    lastMlPredictionKey = null;
                     const staleMessage = document.createElement('p');
                     staleMessage.style.color = 'var(--text-muted)';
                     staleMessage.textContent = 'Prediction paused until fresh sensor readings arrive.';
@@ -2247,7 +2253,7 @@ function updateLiveData() {
         .catch(() => {});
 }
 
-setInterval(updateLiveData, 5000);
+setInterval(updateLiveData, 3000);
 </script>
 <script>
 // Escape closes the Settings modal

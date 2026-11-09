@@ -1349,9 +1349,8 @@ function confirmLogout(e) {
 recountAll();
 applyFilters();
 
-// ── Silent live update every 5 seconds ────────────
-function updateNotifPage() {
-    // 1. Refresh alert banner via live_data.php
+// ── Keep sensor banners aligned across pages ──────
+function updateNotifBanner() {
     fetch('live_data.php')
         .then(r => r.json())
         .then(d => {
@@ -1378,8 +1377,10 @@ function updateNotifPage() {
             }
         })
         .catch(() => {});
+}
 
-    // 2. Refresh notification list silently
+// Notification history refreshes less often to limit page and database work.
+function updateNotificationList() {
     fetch('notificationspage.php')
         .then(r => r.text())
         .then(html => {
@@ -1396,7 +1397,10 @@ function updateNotifPage() {
         .catch(() => {});
 }
 
-setInterval(updateNotifPage, 5000);
+updateNotifBanner();
+updateNotificationList();
+setInterval(updateNotifBanner, 3000);
+setInterval(updateNotificationList, 5000);
 </script>
 <script>
 // Escape closes the Settings modal

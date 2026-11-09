@@ -1566,7 +1566,7 @@ function updateHistoricalSensorStatus() {
 }
 
 updateHistoricalSensorStatus();
-setInterval(updateHistoricalSensorStatus, 5000);
+setInterval(updateHistoricalSensorStatus, 3000);
 setInterval(() => refreshHistory(), 5000);
 </script>
 <script>

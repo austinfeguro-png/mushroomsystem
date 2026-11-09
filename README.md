@@ -127,10 +127,33 @@ python train_models.py     # requires ≥50 paired sensor readings in the DB
 python prediction_api.py   # keep running while the dashboard is open (port 5000)
 ```
 
-Before training, select `BIOSYNC_DB_PROFILE=local` or `online` and set that profile's
-`BIOSYNC_<PROFILE>_DB_HOST`, `_DB_NAME`, `_DB_USER`, and `_DB_PASSWORD` environment
-variables. Use a database account with read-only access to the trainer's source tables;
-do not put database credentials in the repository.
+For a one-time training run against Aiven, use PowerShell from the project folder.
+Copy the host, port, database name, username, and password from your Aiven service's
+connection information, and download its CA certificate. Set these values only in
+the PowerShell window; do not put credentials or the certificate in the repository.
+The account needs `SELECT` access to `devices` and `sensor_logs` (a read-only account
+is recommended).
+
+```powershell
+Set-Location C:\xampp\htdocs\mushroomsystem\biosync_ml
+$env:BIOSYNC_DB_PROFILE = 'online'
+$env:BIOSYNC_ONLINE_DB_HOST = '<Aiven host>'
+$env:BIOSYNC_ONLINE_DB_PORT = '<Aiven port>'
+$env:BIOSYNC_ONLINE_DB_NAME = '<database name>'
+$env:BIOSYNC_ONLINE_DB_USER = '<your Aiven username>'
+$env:BIOSYNC_ONLINE_DB_PASSWORD = '<your Aiven password>'
+$env:BIOSYNC_ONLINE_DB_SSL_CA = 'C:\path\to\ca.pem'
+python train_models.py
+```
+
+The trainer needs at least 50 paired temperature/humidity readings and at least two
+examples in each generated condition class. Labels are derived from the configured
+stage thresholds, so the reported scores evaluate agreement with those rules rather
+than independent biological ground truth. Successful training writes
+`biosync_models.pkl` and `ml_results.json` in `biosync_ml/`. Review the results, then
+commit and push the updated artifacts to the repository branch used by Render so its
+next deployment serves the new models. The environment values above disappear when
+you close that PowerShell window.
 
 ### 3. Arduino Uno + NodeMCU hardware
 
