@@ -30,7 +30,19 @@ if ($deviceToken === '' || !hash_equals($deviceToken, (string)$providedToken)) {
 
 $pdo = getDB();
 
-function persistActuatorFeedback(PDO $pdo, int $fanState, int $pumpState, ?bool $sensorValid = null): void {
+$pumpCooldownSeconds = null;
+if (array_key_exists('pump_cooldown_seconds', $_POST)) {
+    $cooldownRaw = $_POST['pump_cooldown_seconds'];
+    if (!is_scalar($cooldownRaw) || !ctype_digit((string)$cooldownRaw)
+        || (int)$cooldownRaw > 60) {
+        http_response_code(400);
+        echo "Invalid pump cooldown";
+        exit;
+    }
+    $pumpCooldownSeconds = (int)$cooldownRaw;
+}
+
+function persistActuatorFeedback(PDO $pdo, int $fanState, int $pumpState, ?bool $sensorValid = null, ?int $pumpCooldownSeconds = null): void {
     $pdo->beginTransaction();
     try {
         $stmt = $pdo->prepare("UPDATE devices SET current_state = :val WHERE device_name = :name");
@@ -45,6 +57,15 @@ function persistActuatorFeedback(PDO $pdo, int $fanState, int $pumpState, ?bool 
             VALUES ('actuator_state_reported_at', :reported_at)
             ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)")
             ->execute(['reported_at' => (string)time()]);
+        if ($pumpCooldownSeconds !== null) {
+            $cooldownUntil = $pumpCooldownSeconds > 0
+                ? (string)(time() + $pumpCooldownSeconds)
+                : '0';
+            $pdo->prepare("INSERT INTO system_settings (setting_key, setting_value)
+                VALUES ('pump_cooldown_until', :cooldown_until)
+                ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)")
+                ->execute(['cooldown_until' => $cooldownUntil]);
+        }
         if ($sensorValid !== null) {
             $pdo->prepare("INSERT INTO system_settings (setting_key, setting_value)
                 VALUES ('sensor_reading_valid', :valid)
@@ -81,7 +102,7 @@ if (isset($_POST['state_only']) && (string)$_POST['state_only'] === '1') {
         exit;
     }
     try {
-        persistActuatorFeedback($pdo, (int)$fanActual, (int)$pumpActual);
+        persistActuatorFeedback($pdo, (int)$fanActual, (int)$pumpActual, null, $pumpCooldownSeconds);
     } catch (Throwable $e) {
         error_log("BioSync actuator feedback error: " . $e->getMessage());
         http_response_code(500);
@@ -224,7 +245,7 @@ $hasActualStates = is_scalar($fanActualRaw) && in_array((string)$fanActualRaw, [
     && is_scalar($pumpActualRaw) && in_array((string)$pumpActualRaw, ['0', '1'], true);
 if ($hasActualStates) {
     try {
-        persistActuatorFeedback($pdo, (int)$fanActualRaw, (int)$pumpActualRaw);
+        persistActuatorFeedback($pdo, (int)$fanActualRaw, (int)$pumpActualRaw, null, $pumpCooldownSeconds);
     } catch (Throwable $e) {
         error_log("BioSync actuator feedback error: " . $e->getMessage());
     }

@@ -6,7 +6,7 @@
 // Keep the Uno and ESP protocol parsers in sync.
 namespace BioSync {
 struct Reading { float temperature, humidity; };
-struct OutputState { bool fan, pump; };
+struct OutputState { bool fan, pump; unsigned int pumpCooldownSeconds; };
 struct Command {
   bool fan, pump;
   bool fanManual, pumpManual;
@@ -57,6 +57,18 @@ inline bool parseOutputState(const char *p, OutputState &result) {
   state.fan = *p++ == '1';
   if (!literal(p, ",PUMP=") || (*p != '0' && *p != '1')) return false;
   state.pump = *p++ == '1';
+  state.pumpCooldownSeconds = 0;
+  if (*p != '\0') {
+    if (!literal(p, ",PUMP_COOLDOWN=")) return false;
+    if (*p < '0' || *p > '9') return false;
+    unsigned int cooldownSeconds = 0;
+    while (*p >= '0' && *p <= '9') {
+      unsigned int digit = (unsigned int)(*p++ - '0');
+      if (cooldownSeconds > (60U - digit) / 10U) return false;
+      cooldownSeconds = cooldownSeconds * 10U + digit;
+    }
+    state.pumpCooldownSeconds = cooldownSeconds;
+  }
   if (*p != '\0') return false;
   result = state;
   return true;

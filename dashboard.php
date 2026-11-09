@@ -267,6 +267,10 @@ $pumpState = isset($devices['Water Pump'])      && $devices['Water Pump']      =
 $actuatorReportedAt = (int)($settings['actuator_state_reported_at'] ?? 0);
 $actuatorFeedbackAge = $actuatorReportedAt > 0 ? max(0, time() - $actuatorReportedAt) : null;
 $actuatorFeedbackFresh = $actuatorFeedbackAge !== null && $actuatorFeedbackAge <= 15;
+$pumpCooldownUntil = (int)($settings['pump_cooldown_until'] ?? 0);
+$pumpCooldownRemaining = $actuatorFeedbackFresh && !$pumpState && $pumpCooldownUntil > time()
+    ? $pumpCooldownUntil - time()
+    : 0;
 
 // Historical chart data
 $days = []; $tempHistory = []; $humHistory = [];
@@ -710,6 +714,12 @@ if ($alertTriggered) {
         .state-label.on  { color: var(--primary); }
         .state-label.off { color: var(--text-light); }
         .state-label.stale { color: var(--text-muted); }
+        .pump-cooldown {
+            margin-top: 6px;
+            color: var(--text-muted);
+            font-size: 12px;
+            font-weight: 600;
+        }
 
         .auto-badge {
             margin-top: 8px;
@@ -1334,6 +1344,10 @@ if ($alertTriggered) {
                                 <span class="device-spinner" id="pumpSpinner" style="display:none;">
                                     <i class="fa-solid fa-circle-notch fa-spin" style="font-size:13px;color:var(--text-muted);"></i>
                                 </span>
+                            </div>
+                            <div class="pump-cooldown" id="pumpCooldownStatus" aria-live="polite" <?php echo $pumpCooldownRemaining > 0 ? '' : 'hidden'; ?>>
+                                <i class="fa-solid fa-hourglass-half" aria-hidden="true"></i>
+                                Pump cooldown: <span id="pumpCooldownTimer"><?php echo gmdate('i:s', $pumpCooldownRemaining); ?></span> remaining
                             </div>
                             <div class="auto-badge"><i class="fa-solid fa-link"></i> Auto-Alert</div>
                         </div>
@@ -2155,6 +2169,18 @@ function updateLiveData() {
                 if (pumpLabel) {
                     pumpLabel.className = 'state-label ' + (pumpFresh ? (d.pumpState ? 'on' : 'off') : 'stale');
                     pumpLabel.textContent = pumpFresh ? (d.pumpState ? 'Running' : 'Standby') : 'No feedback';
+                }
+                const pumpCooldownStatus = document.getElementById('pumpCooldownStatus');
+                const pumpCooldownTimer = document.getElementById('pumpCooldownTimer');
+                const pumpCooldownRemaining = Math.max(0, Number(d.pumpCooldownRemaining) || 0);
+                if (pumpCooldownStatus) {
+                    pumpCooldownStatus.hidden = !pumpFresh || Boolean(d.pumpState) || pumpCooldownRemaining <= 0;
+                }
+                if (pumpCooldownTimer && pumpCooldownRemaining > 0) {
+                    const minutes = Math.floor(pumpCooldownRemaining / 60);
+                    const seconds = pumpCooldownRemaining % 60;
+                    pumpCooldownTimer.textContent = String(minutes).padStart(2, '0') + ':'
+                        + String(seconds).padStart(2, '0');
                 }
                 if (pumpToggle) pumpToggle.checked = d.pumpMode === 'manual' ? d.pumpRequested : d.pumpState;
                 if (pumpMode) {

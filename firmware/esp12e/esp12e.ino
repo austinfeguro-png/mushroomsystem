@@ -17,7 +17,7 @@ const unsigned long WIFI_RETRY = 15000UL;
 const unsigned long LOG_INTERVAL = 10UL * 60UL * 1000UL;
 BioSync::LineBuffer incoming;
 BioSync::Reading reading = {0, 0};
-BioSync::OutputState outputState = {false, false};
+BioSync::OutputState outputState = {false, false, 0};
 bool haveReading = false, haveOutputState = false, firstLogPending = true;
 bool outputStateReportPending = false;
 unsigned long lastReading = 0, lastOutputState = 0, lastPost = 0;
@@ -201,7 +201,7 @@ void readUno() {
       outputStateReportPending = true;
       ++outputStateVersion;
     }
-    outputState = {false, false};
+    outputState = {false, false, 0};
     haveOutputState = true; // The Uno drops both outputs when this invalid frame is received.
     lastOutputState = millis();
     if (millis() - lastFrameWarning >= 5000UL) {
@@ -292,7 +292,8 @@ bool sendDataToServer(float temp, float hum, bool logReading) {
               + "&log=" + String(logReading ? 1 : 0);
   if (haveOutputState && millis() - lastOutputState < READING_TIMEOUT) {
     body += "&fan_actual=" + String(outputState.fan ? 1 : 0)
-          + "&pump_actual=" + String(outputState.pump ? 1 : 0);
+          + "&pump_actual=" + String(outputState.pump ? 1 : 0)
+          + "&pump_cooldown_seconds=" + String(outputState.pumpCooldownSeconds);
   }
   Serial.print(F("[HTTP] Starting POST; free heap=")); Serial.println(ESP.getFreeHeap());
   int code = http.POST(body);
@@ -365,7 +366,8 @@ bool sendOutputStateToServer() {
   http.addHeader("Content-Type", "application/x-www-form-urlencoded");
   http.addHeader("X-Device-Token", BIOSYNC_DEVICE_TOKEN);
   String body = "state_only=1&fan_actual=" + String(outputState.fan ? 1 : 0)
-              + "&pump_actual=" + String(outputState.pump ? 1 : 0);
+              + "&pump_actual=" + String(outputState.pump ? 1 : 0)
+              + "&pump_cooldown_seconds=" + String(outputState.pumpCooldownSeconds);
   int code = http.POST(body);
   if (code != HTTP_CODE_OK) {
     Serial.print(F("[HTTP] Output-state update failed: ")); Serial.println(code);

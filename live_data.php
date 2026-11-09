@@ -65,6 +65,10 @@ $pumpRequested = $pumpMode === 'manual' && ($settings['pump_manual_state'] ?? '0
 $actuatorReportedAt = (int)($settings['actuator_state_reported_at'] ?? 0);
 $actuatorFeedbackAge = $actuatorReportedAt > 0 ? max(0, time() - $actuatorReportedAt) : null;
 $actuatorFeedbackFresh = $actuatorFeedbackAge !== null && $actuatorFeedbackAge <= 15;
+$pumpCooldownUntil = (int)($settings['pump_cooldown_until'] ?? 0);
+$pumpCooldownRemaining = $actuatorFeedbackFresh && !$pumpState && $pumpCooldownUntil > time()
+    ? $pumpCooldownUntil - time()
+    : 0;
 
 $presenceStmt = $pdo->prepare(
     "SELECT u.id,
@@ -127,6 +131,7 @@ echo json_encode([
     'pumpRequested'  => $pumpRequested,
     'actuatorFeedbackFresh' => $actuatorFeedbackFresh,
     'actuatorFeedbackAge' => $actuatorFeedbackAge,
+    'pumpCooldownRemaining' => $pumpCooldownRemaining,
     'tempUnit'       => $TEMP_UNIT,
     'tempAbove'      => $temperature > $MAX_TEMP,
     'tempBelow'      => $temperature < $MIN_TEMP,

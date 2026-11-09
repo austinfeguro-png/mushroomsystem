@@ -157,8 +157,9 @@ boards USB-powered with the 5V-to-VIN jumper removed during this test.
   command re-enables control. AUTO mode follows stage thresholds; MANUAL mode
   follows the dashboard request. High humidity still forces the pump off, and
   manual pump requests still obey the runtime limit and cooldown. The Uno sends
-  `STATE:FAN=n,PUMP=n` feedback after applying its safety rules; the dashboard
-  displays these reported output-pin states, not just the requested states.
+  `STATE:FAN=n,PUMP=n,PUMP_COOLDOWN=seconds` feedback after applying its safety
+  rules; the dashboard displays reported output-pin states and the remaining pump
+  cooldown, not just the requested states.
   Missing feedback does not get guessed from the thresholds; the dashboard marks
   the state as stale after 15 seconds. If the sensor reading expires, the bridge
   sends state-only feedback so a safe OFF state still reaches the dashboard

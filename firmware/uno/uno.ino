@@ -60,6 +60,13 @@ void applyOutputs(unsigned long now) {
   digitalWrite(LED_BUILTIN, !safe || abnormal ? HIGH : LOW);
 }
 
+unsigned int pumpCooldownRemainingSeconds(unsigned long now) {
+  if (!pumpCooling) return 0;
+  unsigned long elapsed = now - pumpStopped;
+  if (elapsed >= PUMP_COOLDOWN_MS) return 0;
+  return (unsigned int)((PUMP_COOLDOWN_MS - elapsed + 999UL) / 1000UL);
+}
+
 void setup() {
   // Set the off latch before enabling output mode to avoid an active-LOW pulse.
   relay(FAN_RELAY, false);
@@ -106,7 +113,9 @@ void loop() {
   }
   applyOutputs(millis());
   nodeLink.print(F("STATE:FAN=")); nodeLink.print(fanOn ? 1 : 0);
-  nodeLink.print(F(",PUMP=")); nodeLink.println(pumpOn ? 1 : 0);
+  nodeLink.print(F(",PUMP=")); nodeLink.print(pumpOn ? 1 : 0);
+  nodeLink.print(F(",PUMP_COOLDOWN="));
+  nodeLink.println(pumpCooldownRemainingSeconds(millis()));
   if (!sensorValid) {
     nodeLink.println(F("ERR:SENSOR"));
     Serial.println(F("Sensor fault; fan and pump OFF"));
