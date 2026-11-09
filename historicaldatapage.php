@@ -228,7 +228,7 @@ $conditionString    = '';
 $sensorReportedAt = (int)($settings['sensor_reading_reported_at'] ?? 0);
 $sensorDataAge = $sensorReportedAt > 0 ? max(0, time() - $sensorReportedAt) : null;
 $sensorDataFresh = ($settings['sensor_reading_valid'] ?? '0') === '1'
-    && $sensorDataAge !== null && $sensorDataAge <= 30;
+    && $sensorDataAge !== null && $sensorDataAge <= 20;
 
 // Match the dashboard's live values and freshness rule; chart history may be old.
 $deviceStmt = $pdo->query("SELECT device_name, current_state FROM devices
@@ -1567,7 +1567,7 @@ function updateHistoricalSensorStatus() {
 
 updateHistoricalSensorStatus();
 setInterval(updateHistoricalSensorStatus, 3000);
-setInterval(() => refreshHistory(), 5000);
+setInterval(() => refreshHistory(), 60000);
 </script>
 <script>
 // Escape closes the Settings modal

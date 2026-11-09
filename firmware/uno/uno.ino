@@ -13,7 +13,6 @@ SoftwareSerial nodeLink(12, 11); // RX from Node D7, TX through divider to Node 
 DHT dht(DHT_PIN, DHT22);
 
 const unsigned long SENSOR_INTERVAL = 3000UL;
-const unsigned long LINK_DEBUG_INTERVAL = 5000UL;
 const unsigned long SENSOR_TIMEOUT = 8000UL;
 const unsigned long COMMAND_TIMEOUT = 30000UL;
 const unsigned long PUMP_MAX_RUN_MS = 10000UL;
@@ -25,8 +24,6 @@ bool sensorValid = false, commandValid = false;
 bool fanOn = false, pumpOn = false, pumpCooling = false;
 unsigned long lastSample = 0, lastGoodReading = 0, lastCommand = 0;
 unsigned long pumpStarted = 0, pumpStopped = 0;
-unsigned long lastLinkDebug = 0;
-unsigned int linkBytesSinceDebug = 0;
 
 void relay(byte pin, bool on) {
   digitalWrite(pin, RELAY_ACTIVE_LOW ? (on ? LOW : HIGH) : (on ? HIGH : LOW));
@@ -83,7 +80,6 @@ void loop() {
   unsigned long now = millis();
   while (nodeLink.available()) {
     char received = (char)nodeLink.read();
-    ++linkBytesSinceDebug;
     if (incoming.push(received)) {
       Serial.print(F("[LINK RX D12] "));
       Serial.println(incoming.data);
@@ -98,14 +94,6 @@ void loop() {
         Serial.println(F("Link error or invalid command; outputs off"));
       }
     }
-  }
-  if (now - lastLinkDebug >= LINK_DEBUG_INTERVAL) {
-    lastLinkDebug = now;
-    Serial.print(F("[LINK D12 DEBUG] bytes in 5s="));
-    Serial.print(linkBytesSinceDebug);
-    Serial.print(F(" pin="));
-    Serial.println(digitalRead(12) == HIGH ? F("HIGH") : F("LOW"));
-    linkBytesSinceDebug = 0;
   }
   applyOutputs(millis());
   if (now - lastSample < SENSOR_INTERVAL) return;

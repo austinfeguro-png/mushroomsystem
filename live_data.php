@@ -55,7 +55,7 @@ $humidity    = (float)($devices['Humidity Node 1']    ?? 0.0);
 $sensorReportedAt = (int)($settings['sensor_reading_reported_at'] ?? 0);
 $sensorDataAge = $sensorReportedAt > 0 ? max(0, time() - $sensorReportedAt) : null;
 $sensorDataFresh = ($settings['sensor_reading_valid'] ?? '0') === '1'
-    && $sensorDataAge !== null && $sensorDataAge <= 30;
+    && $sensorDataAge !== null && $sensorDataAge <= 20;
 $fanState    = ($devices['Ventilation Fan'] ?? '0') == '1';
 $pumpState   = ($devices['Water Pump']      ?? '0') == '1';
 $fanMode     = ($settings['fan_control_mode'] ?? 'auto') === 'manual' ? 'manual' : 'auto';
