@@ -2098,6 +2098,28 @@ function confirmAdvance() {
 // Updates: temp, hum, fan, pump, alert banner,
 //          charts, recent notifications, ML widget
 // ================================================
+let pumpCooldownDeadline = Date.now() + <?php echo (int)$pumpCooldownRemaining; ?> * 1000;
+
+function renderPumpCooldownTimer() {
+    const status = document.getElementById('pumpCooldownStatus');
+    const timer = document.getElementById('pumpCooldownTimer');
+    if (!status || !timer || status.hidden || pumpCooldownDeadline <= 0) return;
+
+    const remaining = Math.max(0, Math.ceil((pumpCooldownDeadline - Date.now()) / 1000));
+    if (remaining <= 0) {
+        status.hidden = true;
+        pumpCooldownDeadline = 0;
+        return;
+    }
+
+    const minutes = Math.floor(remaining / 60);
+    const seconds = remaining % 60;
+    timer.textContent = String(minutes).padStart(2, '0') + ':'
+        + String(seconds).padStart(2, '0');
+}
+
+setInterval(renderPumpCooldownTimer, 1000);
+
 function updateLiveData() {
     const modalOpen = document.getElementById('settingsModal').classList.contains('open');
     if (modalOpen || pendingToggle || pendingSettings) return;
@@ -2171,17 +2193,19 @@ function updateLiveData() {
                     pumpLabel.textContent = pumpFresh ? (d.pumpState ? 'Running' : 'Standby') : 'No feedback';
                 }
                 const pumpCooldownStatus = document.getElementById('pumpCooldownStatus');
-                const pumpCooldownTimer = document.getElementById('pumpCooldownTimer');
                 const pumpCooldownRemaining = Math.max(0, Number(d.pumpCooldownRemaining) || 0);
                 if (pumpCooldownStatus) {
                     pumpCooldownStatus.hidden = !pumpFresh || Boolean(d.pumpState) || pumpCooldownRemaining <= 0;
                 }
-                if (pumpCooldownTimer && pumpCooldownRemaining > 0) {
-                    const minutes = Math.floor(pumpCooldownRemaining / 60);
-                    const seconds = pumpCooldownRemaining % 60;
-                    pumpCooldownTimer.textContent = String(minutes).padStart(2, '0') + ':'
-                        + String(seconds).padStart(2, '0');
+                if (pumpCooldownStatus?.hidden) {
+                    pumpCooldownDeadline = 0;
+                } else {
+                    const reportedDeadline = Date.now() + pumpCooldownRemaining * 1000;
+                    pumpCooldownDeadline = pumpCooldownDeadline > Date.now()
+                        ? Math.min(pumpCooldownDeadline, reportedDeadline)
+                        : reportedDeadline;
                 }
+                renderPumpCooldownTimer();
                 if (pumpToggle) pumpToggle.checked = d.pumpMode === 'manual' ? d.pumpRequested : d.pumpState;
                 if (pumpMode) {
                     pumpMode.textContent = d.pumpMode === 'manual' ? 'MANUAL' : 'AUTO';
