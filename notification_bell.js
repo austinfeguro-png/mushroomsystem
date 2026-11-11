@@ -13,6 +13,20 @@
                 bell.setAttribute('aria-label', unreadCount > 0
                     ? 'Notifications, ' + unreadCount + ' unread'
                     : 'Notifications');
+
+                const countTargets = [
+                    ['badgeAll', data.totalCount],
+                    ['badgeUnread', data.unreadCount],
+                    ['badgeAlerts', data.alertCount],
+                    ['badgeInfo', data.infoCount],
+                    ['statTotal', data.totalCount],
+                    ['statUnread', data.unreadCount],
+                    ['statAlerts', data.alertCount]
+                ];
+                countTargets.forEach(([id, value]) => {
+                    const target = document.getElementById(id);
+                    if (target && Number.isFinite(Number(value))) target.textContent = Number(value);
+                });
             })
             .catch(() => {});
     }

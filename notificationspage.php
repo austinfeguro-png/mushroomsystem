@@ -22,6 +22,63 @@ $userName = $_SESSION['user_name'];
 $userId   = $_SESSION['user_id'];
 $isAdmin  = isset($_SESSION['user_role']) && strtolower($_SESSION['user_role']) === 'admin';
 
+$allowedNotificationFilters = ['all', 'unread', 'alert', 'info'];
+$requestedFilter = $_GET['filter'] ?? 'all';
+$notificationFilter = is_scalar($requestedFilter) && in_array((string)$requestedFilter, $allowedNotificationFilters, true)
+    ? (string)$requestedFilter
+    : 'all';
+$requestedSearch = $_GET['q'] ?? '';
+$notificationSearch = is_scalar($requestedSearch) ? trim(substr((string)$requestedSearch, 0, 100)) : '';
+$requestedPage = filter_var($_GET['page'] ?? 1, FILTER_VALIDATE_INT);
+$notificationPage = $requestedPage !== false && $requestedPage > 0 ? $requestedPage : 1;
+$notificationsPerPage = 25;
+
+$notificationWhere = [];
+$notificationParams = [];
+if ($notificationFilter === 'unread') {
+    $notificationWhere[] = 'is_read = 0';
+} elseif ($notificationFilter === 'alert' || $notificationFilter === 'info') {
+    $notificationWhere[] = 'type = :filter_type';
+    $notificationParams['filter_type'] = $notificationFilter;
+}
+if ($notificationSearch !== '') {
+    $notificationWhere[] = '(title LIKE :search_title OR description LIKE :search_description OR message LIKE :search_message)';
+    $searchLike = '%' . $notificationSearch . '%';
+    $notificationParams['search_title'] = $searchLike;
+    $notificationParams['search_description'] = $searchLike;
+    $notificationParams['search_message'] = $searchLike;
+}
+$notificationWhereSql = $notificationWhere ? ' WHERE ' . implode(' AND ', $notificationWhere) : '';
+
+function getNotificationCounts(PDO $pdo): array {
+    $row = $pdo->query("SELECT COUNT(*) AS total,
+        COALESCE(SUM(CASE WHEN is_read = 0 THEN 1 ELSE 0 END), 0) AS unread,
+        COALESCE(SUM(CASE WHEN type = 'alert' THEN 1 ELSE 0 END), 0) AS alerts,
+        COALESCE(SUM(CASE WHEN type = 'info' THEN 1 ELSE 0 END), 0) AS infos
+        FROM notifications")->fetch(PDO::FETCH_ASSOC);
+
+    return [
+        'total' => (int)($row['total'] ?? 0),
+        'unread' => (int)($row['unread'] ?? 0),
+        'alerts' => (int)($row['alerts'] ?? 0),
+        'infos' => (int)($row['infos'] ?? 0),
+    ];
+}
+
+function getFilteredNotificationCount(PDO $pdo, string $whereSql, array $params): int {
+    $stmt = $pdo->prepare('SELECT COUNT(*) FROM notifications' . $whereSql);
+    $stmt->execute($params);
+    return (int)$stmt->fetchColumn();
+}
+
+function notificationPageUrl(string $filter, string $search, int $page): string {
+    return 'notificationspage.php?' . http_build_query([
+        'filter' => $filter,
+        'q' => $search,
+        'page' => max(1, $page),
+    ]);
+}
+
 // ==========================================
 // 3. HANDLE AJAX POST REQUESTS
 // ==========================================
@@ -184,33 +241,28 @@ if ($alertTriggered) {
 }
 
 // ==========================================
-// 5. FETCH NOTIFICATIONS
+// 5. FETCH PAGED NOTIFICATIONS
 // ==========================================
-$notifStmt         = $pdo->query("SELECT * FROM notifications ORDER BY created_at DESC");
-$notificationsRaw  = $notifStmt->fetchAll(PDO::FETCH_ASSOC);
+$notificationCounts = getNotificationCounts($pdo);
+$filteredNotificationCount = getFilteredNotificationCount($pdo, $notificationWhereSql, $notificationParams);
+$notificationPageCount = max(1, (int)ceil($filteredNotificationCount / $notificationsPerPage));
+$notificationPage = min($notificationPage, $notificationPageCount);
+$notificationOffset = ($notificationPage - 1) * $notificationsPerPage;
 
-$notifications        = [];
-$totalUnread          = 0;
-
-if (empty($notificationsRaw)) {
-    $notifications = [[
-        'id'       => 0,
-        'type'     => 'info',
-        'icon_class' => 'fa-circle-check',
-        'title'    => 'System Stable',
-        'description' => 'No alerts or warnings have been recorded.',
-        'created_at'  => date('Y-m-d H:i:s'),
-        'is_read'  => 1,
-    ]];
-} else {
-    $notifications = $notificationsRaw;
+$notifStmt = $pdo->prepare('SELECT * FROM notifications' . $notificationWhereSql
+    . ' ORDER BY created_at DESC, id DESC LIMIT :page_size OFFSET :page_offset');
+foreach ($notificationParams as $name => $value) {
+    $notifStmt->bindValue(':' . $name, $value, PDO::PARAM_STR);
 }
+$notifStmt->bindValue(':page_size', $notificationsPerPage, PDO::PARAM_INT);
+$notifStmt->bindValue(':page_offset', $notificationOffset, PDO::PARAM_INT);
+$notifStmt->execute();
+$notifications = $notifStmt->fetchAll(PDO::FETCH_ASSOC);
 
-foreach ($notifications as $n) {
-    if (!$n['is_read']) {
-        $totalUnread++;
-    }
-}
+$firstNotificationNumber = $filteredNotificationCount > 0 ? $notificationOffset + 1 : 0;
+$lastNotificationNumber = min($notificationOffset + count($notifications), $filteredNotificationCount);
+$filterUrl = static fn(string $filter): string => notificationPageUrl($filter, $notificationSearch, 1);
+$pageUrl = static fn(int $page): string => notificationPageUrl($notificationFilter, $notificationSearch, $page);
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -466,7 +518,7 @@ foreach ($notifications as $n) {
             position: relative;
             display: flex; align-items: center;
         }
-        .search-wrap i {
+        .search-wrap > i {
             position: absolute; left: 10px;
             font-size: 13px; color: var(--text-light);
             pointer-events: none;
@@ -483,6 +535,13 @@ foreach ($notifications as $n) {
             transition: border-color var(--transition), width var(--transition);
         }
         .search-input:focus { border-color: var(--primary); width: 240px; }
+        .search-submit {
+            width: 32px; height: 32px; margin-left: 6px;
+            border: 0; border-radius: var(--radius-sm);
+            background: var(--primary); color: #fff; cursor: pointer;
+        }
+        .search-submit i { position: static; color: inherit; font-size: 12px; }
+        .search-submit:hover { background: var(--primary-dark); }
 
         /* Filter pills */
         .filter-pill {
@@ -495,6 +554,7 @@ foreach ($notifications as $n) {
             cursor: pointer;
             transition: all var(--transition);
             display: inline-flex; align-items: center; gap: 6px;
+            text-decoration: none;
         }
         .filter-pill:hover  { background: var(--bg-body); color: var(--text-main); }
         .filter-pill.active { background: var(--primary); border-color: var(--primary); color: #fff; }
@@ -507,6 +567,22 @@ foreach ($notifications as $n) {
             line-height: 18px; min-width: 18px; text-align: center;
         }
         .filter-pill:not(.active) .pill-badge { background: var(--bg-body); color: var(--text-muted); }
+
+        .notification-pagination {
+            display: flex; align-items: center; justify-content: space-between;
+            gap: 12px; flex-wrap: wrap; margin-top: 18px;
+        }
+        .notification-pagination[hidden] { display: none; }
+        .pagination-summary { color: var(--text-muted); font-size: 12px; }
+        .pagination-links { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+        .pagination-link {
+            min-width: 34px; height: 34px; padding: 0 10px;
+            display: inline-flex; align-items: center; justify-content: center;
+            border: 1px solid var(--border); border-radius: var(--radius-sm);
+            color: var(--text-muted); text-decoration: none; font-size: 13px;
+        }
+        .pagination-link:hover { background: var(--bg-body); color: var(--text-main); }
+        .pagination-link.current { background: var(--primary); color: #fff; border-color: var(--primary); }
 
         /* Action buttons */
         .action-link {
@@ -757,14 +833,6 @@ foreach ($notifications as $n) {
             .topbar-sub { display: none; }
         }
 
-        /* Fade-out animation for dismissed items */
-        .notif-item.removing {
-            opacity: 0;
-            transform: translateX(20px);
-            pointer-events: none;
-            transition: opacity 0.3s ease, transform 0.3s ease;
-        }
-    
         /* =====================================================
            SETTINGS MODAL — responsive refinements
            (scoped to #settingsModal; mirrors profile.php)
@@ -886,9 +954,9 @@ foreach ($notifications as $n) {
 
             <!-- STATS BAR -->
             <div class="stats-bar" id="statsBar">
-                <div class="stat-chip"><i class="fa-solid fa-bell" style="color:var(--text-muted);font-size:13px"></i> Total: <strong id="statTotal"><?php echo count($notifications); ?></strong></div>
-                <div class="stat-chip"><i class="fa-solid fa-circle" style="color:var(--primary);font-size:8px"></i> Unread: <strong id="statUnread"><?php echo $totalUnread; ?></strong></div>
-                <div class="stat-chip"><i class="fa-solid fa-triangle-exclamation" style="color:var(--danger);font-size:13px"></i> Alerts: <strong id="statAlerts"><?php echo count(array_filter($notifications, fn($n) => $n['type'] === 'alert')); ?></strong></div>
+                <div class="stat-chip"><i class="fa-solid fa-bell" style="color:var(--text-muted);font-size:13px"></i> Total: <strong id="statTotal"><?php echo $notificationCounts['total']; ?></strong></div>
+                <div class="stat-chip"><i class="fa-solid fa-circle" style="color:var(--primary);font-size:8px"></i> Unread: <strong id="statUnread"><?php echo $notificationCounts['unread']; ?></strong></div>
+                <div class="stat-chip"><i class="fa-solid fa-triangle-exclamation" style="color:var(--danger);font-size:13px"></i> Alerts: <strong id="statAlerts"><?php echo $notificationCounts['alerts']; ?></strong></div>
             </div>
 
             <!-- NOTIFICATION CARD -->
@@ -901,25 +969,30 @@ foreach ($notifications as $n) {
                 <div class="notif-toolbar">
                     <div class="notif-toolbar-left">
                         <!-- Search -->
-                        <div class="search-wrap">
+                        <form class="search-wrap" method="get" action="notificationspage.php">
                             <i class="fa-solid fa-magnifying-glass"></i>
-                            <input type="text" class="search-input" id="searchInput" placeholder="Search notifications…">
-                        </div>
+                            <input type="hidden" name="filter" value="<?php echo htmlspecialchars($notificationFilter, ENT_QUOTES, 'UTF-8'); ?>">
+                            <input type="search" class="search-input" id="searchInput" name="q" maxlength="100" value="<?php echo htmlspecialchars($notificationSearch, ENT_QUOTES, 'UTF-8'); ?>" placeholder="Search notifications…">
+                            <button class="search-submit" type="submit" aria-label="Search notifications"><i class="fa-solid fa-arrow-right"></i></button>
+                        </form>
                         <!-- Filter pills -->
-                        <button class="filter-pill active" data-filter="all">
-                            All <span class="pill-badge" id="badgeAll"><?php echo count($notifications); ?></span>
-                        </button>
-                        <button class="filter-pill" data-filter="unread">
-                            Unread <span class="pill-badge" id="badgeUnread"><?php echo $totalUnread; ?></span>
-                        </button>
-                        <button class="filter-pill" data-filter="alert">
-                            Alerts <span class="pill-badge" id="badgeAlerts"><?php echo count(array_filter($notifications, fn($n) => $n['type'] === 'alert')); ?></span>
-                        </button>
-                        <button class="filter-pill" data-filter="info">
-                            Info <span class="pill-badge" id="badgeInfo"><?php echo count(array_filter($notifications, fn($n) => $n['type'] === 'info')); ?></span>
-                        </button>
+                        <a class="filter-pill<?php echo $notificationFilter === 'all' ? ' active' : ''; ?>" href="<?php echo htmlspecialchars($filterUrl('all'), ENT_QUOTES, 'UTF-8'); ?>" <?php echo $notificationFilter === 'all' ? 'aria-current="page"' : ''; ?>>
+                            All <span class="pill-badge" id="badgeAll"><?php echo $notificationCounts['total']; ?></span>
+                        </a>
+                        <a class="filter-pill<?php echo $notificationFilter === 'unread' ? ' active' : ''; ?>" href="<?php echo htmlspecialchars($filterUrl('unread'), ENT_QUOTES, 'UTF-8'); ?>" <?php echo $notificationFilter === 'unread' ? 'aria-current="page"' : ''; ?>>
+                            Unread <span class="pill-badge" id="badgeUnread"><?php echo $notificationCounts['unread']; ?></span>
+                        </a>
+                        <a class="filter-pill<?php echo $notificationFilter === 'alert' ? ' active' : ''; ?>" href="<?php echo htmlspecialchars($filterUrl('alert'), ENT_QUOTES, 'UTF-8'); ?>" <?php echo $notificationFilter === 'alert' ? 'aria-current="page"' : ''; ?>>
+                            Alerts <span class="pill-badge" id="badgeAlerts"><?php echo $notificationCounts['alerts']; ?></span>
+                        </a>
+                        <a class="filter-pill<?php echo $notificationFilter === 'info' ? ' active' : ''; ?>" href="<?php echo htmlspecialchars($filterUrl('info'), ENT_QUOTES, 'UTF-8'); ?>" <?php echo $notificationFilter === 'info' ? 'aria-current="page"' : ''; ?>>
+                            Info <span class="pill-badge" id="badgeInfo"><?php echo $notificationCounts['infos']; ?></span>
+                        </a>
                     </div>
                     <div class="notif-toolbar-right">
+                        <a class="action-link" href="<?php echo htmlspecialchars($filterUrl($notificationFilter), ENT_QUOTES, 'UTF-8'); ?>">
+                            <i class="fa-solid fa-rotate"></i> Refresh
+                        </a>
                         <button class="action-link success" id="markAllReadBtn">
                             <i class="fa-solid fa-check-double"></i> Mark all read
                         </button>
@@ -932,10 +1005,10 @@ foreach ($notifications as $n) {
                 <!-- LIST -->
                 <div class="notif-list" id="notifList">
 
-                    <div class="empty-state" id="emptyState">
+                    <div class="empty-state" id="emptyState" style="display:<?php echo $filteredNotificationCount === 0 ? 'flex' : 'none'; ?>;">
                         <i class="fa-regular fa-bell-slash"></i>
                         <h3 style="font-size:16px;font-weight:600;color:var(--text-muted)">No notifications found</h3>
-                        <p>Try a different filter or search term.</p>
+                        <p><?php echo $notificationCounts['total'] === 0 ? 'No notifications have been recorded.' : 'Try a different filter or search term.'; ?></p>
                     </div>
 
                     <?php foreach ($notifications as $n):
@@ -994,6 +1067,33 @@ foreach ($notifications as $n) {
                     <?php endforeach; ?>
 
                 </div><!-- /notif-list -->
+
+                <div class="notification-pagination" id="notificationPagination" <?php echo $notificationPageCount <= 1 ? 'hidden' : ''; ?>>
+                    <div class="pagination-summary" id="paginationSummary">
+                        Showing <?php echo $firstNotificationNumber; ?>–<?php echo $lastNotificationNumber; ?> of <?php echo $filteredNotificationCount; ?> notifications
+                    </div>
+                    <nav class="pagination-links" aria-label="Notification pages">
+                        <?php if ($notificationPage > 1): ?>
+                            <a class="pagination-link" href="<?php echo htmlspecialchars($pageUrl(1), ENT_QUOTES, 'UTF-8'); ?>" aria-label="First page">«</a>
+                            <a class="pagination-link" href="<?php echo htmlspecialchars($pageUrl($notificationPage - 1), ENT_QUOTES, 'UTF-8'); ?>">Previous</a>
+                        <?php endif; ?>
+                        <?php
+                        $firstVisiblePage = max(1, $notificationPage - 2);
+                        $lastVisiblePage = min($notificationPageCount, $notificationPage + 2);
+                        for ($pageNumber = $firstVisiblePage; $pageNumber <= $lastVisiblePage; $pageNumber++):
+                        ?>
+                            <?php if ($pageNumber === $notificationPage): ?>
+                                <span class="pagination-link current" aria-current="page"><?php echo $pageNumber; ?></span>
+                            <?php else: ?>
+                                <a class="pagination-link" href="<?php echo htmlspecialchars($pageUrl($pageNumber), ENT_QUOTES, 'UTF-8'); ?>"><?php echo $pageNumber; ?></a>
+                            <?php endif; ?>
+                        <?php endfor; ?>
+                        <?php if ($notificationPage < $notificationPageCount): ?>
+                            <a class="pagination-link" href="<?php echo htmlspecialchars($pageUrl($notificationPage + 1), ENT_QUOTES, 'UTF-8'); ?>">Next</a>
+                            <a class="pagination-link" href="<?php echo htmlspecialchars($pageUrl($notificationPageCount), ENT_QUOTES, 'UTF-8'); ?>" aria-label="Last page">»</a>
+                        <?php endif; ?>
+                    </nav>
+                </div>
             </div><!-- /card -->
 
         </div><!-- /page-body -->
@@ -1139,75 +1239,22 @@ function post(data) {
     const fd = new FormData();
     fd.append('csrf_token', document.querySelector('meta[name="csrf-token"]').content);
     for (const [k, v] of Object.entries(data)) fd.append(k, v);
-    return fetch('notificationspage.php', { method: 'POST', body: fd }).then(r => r.json());
+    return fetch(window.location.pathname + window.location.search, { method: 'POST', body: fd }).then(r => r.json());
 }
 
 // ================================================
-// COUNTERS
+// LIST STATE
 // ================================================
-function recountAll() {
-    const all    = [...document.querySelectorAll('.notif-item')];
-    const unread = all.filter(i => i.dataset.read === '0');
-    const alerts = all.filter(i => i.dataset.type === 'alert');
-    const infos  = all.filter(i => i.dataset.type === 'info');
-
-    document.getElementById('badgeAll').textContent    = all.length;
-    document.getElementById('badgeUnread').textContent = unread.length;
-    document.getElementById('badgeAlerts').textContent = alerts.length;
-    document.getElementById('badgeInfo').textContent   = infos.length;
-
-    document.getElementById('statTotal').textContent   = all.length;
-    document.getElementById('statUnread').textContent  = unread.length;
-    document.getElementById('statAlerts').textContent  = alerts.length;
-
+function reloadNotificationsPreservingScroll() {
+    sessionStorage.setItem('notificationScrollY', String(window.scrollY));
+    window.location.reload();
 }
 
-// ================================================
-// FILTER + SEARCH
-// ================================================
-let activeFilter = 'all';
-let searchTerm   = '';
-
-function applyFilters() {
-    const items = [...document.querySelectorAll('.notif-item')];
-    let visible = 0;
-
-    items.forEach(item => {
-        const type    = item.dataset.type;
-        const isUnread= item.dataset.read === '0';
-        const text    = item.textContent.toLowerCase();
-
-        const matchFilter =
-            activeFilter === 'all'    ? true :
-            activeFilter === 'unread' ? isUnread :
-            activeFilter === type;
-
-        const matchSearch = searchTerm === '' || text.includes(searchTerm);
-
-        if (matchFilter && matchSearch) {
-            item.style.display = '';
-            visible++;
-        } else {
-            item.style.display = 'none';
-        }
-    });
-
-    document.getElementById('emptyState').style.display = visible === 0 ? 'flex' : 'none';
+const savedNotificationScroll = sessionStorage.getItem('notificationScrollY');
+if (savedNotificationScroll !== null) {
+    sessionStorage.removeItem('notificationScrollY');
+    window.requestAnimationFrame(() => window.scrollTo(0, Number(savedNotificationScroll) || 0));
 }
-
-document.querySelectorAll('.filter-pill').forEach(btn => {
-    btn.addEventListener('click', () => {
-        document.querySelectorAll('.filter-pill').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        activeFilter = btn.dataset.filter;
-        applyFilters();
-    });
-});
-
-document.getElementById('searchInput').addEventListener('input', function () {
-    searchTerm = this.value.toLowerCase().trim();
-    applyFilters();
-});
 
 // ================================================
 // MARK SINGLE AS READ
@@ -1221,16 +1268,7 @@ document.getElementById('notifList').addEventListener('click', function (e) {
         const id   = item.dataset.id;
 
         post({ ajax_action: 'mark_read', notif_id: id }).then(data => {
-            if (!data.success) return;
-            item.classList.remove('unread');
-            item.dataset.read = '1';
-            // Remove unread dot
-            const dot = item.querySelector('.unread-dot');
-            if (dot) dot.remove();
-            // Remove the resolve button (keep dismiss)
-            resolveBtn.remove();
-            recountAll();
-            applyFilters();
+            if (data.success) reloadNotificationsPreservingScroll();
         });
     }
 
@@ -1239,13 +1277,7 @@ document.getElementById('notifList').addEventListener('click', function (e) {
         const id   = item.dataset.id;
 
         post({ ajax_action: 'delete_notif', notif_id: id }).then(data => {
-            if (!data.success) return;
-            item.classList.add('removing');
-            setTimeout(() => {
-                item.remove();
-                recountAll();
-                applyFilters();
-            }, 320);
+            if (data.success) reloadNotificationsPreservingScroll();
         });
     }
 });
@@ -1255,17 +1287,7 @@ document.getElementById('notifList').addEventListener('click', function (e) {
 // ================================================
 document.getElementById('markAllReadBtn').addEventListener('click', () => {
     post({ ajax_action: 'mark_all_read' }).then(data => {
-        if (!data.success) return;
-        document.querySelectorAll('.notif-item').forEach(item => {
-            item.classList.remove('unread');
-            item.dataset.read = '1';
-            const dot = item.querySelector('.unread-dot');
-            if (dot) dot.remove();
-            const resolveBtn = item.querySelector('.js-mark-read');
-            if (resolveBtn) resolveBtn.remove();
-        });
-        recountAll();
-        applyFilters();
+        if (data.success) reloadNotificationsPreservingScroll();
     });
 });
 
@@ -1275,12 +1297,7 @@ document.getElementById('markAllReadBtn').addEventListener('click', () => {
 document.getElementById('deleteReadBtn').addEventListener('click', () => {
     if (!confirm('Delete all read notifications? This cannot be undone.')) return;
     post({ ajax_action: 'delete_all_read' }).then(data => {
-        if (!data.success) return;
-        document.querySelectorAll('.notif-item[data-read="1"]').forEach(item => {
-            item.classList.add('removing');
-            setTimeout(() => item.remove(), 320);
-        });
-        setTimeout(() => { recountAll(); applyFilters(); }, 350);
+        if (data.success) reloadNotificationsPreservingScroll();
     });
 });
 
@@ -1338,10 +1355,6 @@ function confirmLogout(e) {
     if (confirm('Are you sure you want to log out?')) location.href = 'logout.php';
 }
 
-// Init on load
-recountAll();
-applyFilters();
-
 // ── Keep sensor banners aligned across pages ──────
 function updateNotifBanner() {
     fetch('live_data.php')
@@ -1372,28 +1385,8 @@ function updateNotifBanner() {
         .catch(() => {});
 }
 
-// Notification history refreshes less often to limit page and database work.
-function updateNotificationList() {
-    fetch('notificationspage.php')
-        .then(r => r.text())
-        .then(html => {
-            const parser  = new DOMParser();
-            const doc     = parser.parseFromString(html, 'text/html');
-            const newList = doc.getElementById('notifList');
-            const curList = document.getElementById('notifList');
-            if (newList && curList) {
-                curList.innerHTML = newList.innerHTML;
-                recountAll();
-                applyFilters();
-            }
-        })
-        .catch(() => {});
-}
-
 updateNotifBanner();
-updateNotificationList();
 setInterval(updateNotifBanner, 3000);
-setInterval(updateNotificationList, 5000);
 </script>
 <script>
 // Escape closes the Settings modal

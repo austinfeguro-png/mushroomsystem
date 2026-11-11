@@ -21,8 +21,17 @@ require_once 'auth_guard.php';
 requireCurrentActiveUser($pdo, true);
 
 try {
-    $unreadCount = (int)$pdo->query('SELECT COUNT(*) FROM notifications WHERE is_read = 0')->fetchColumn();
-    echo json_encode(['unreadCount' => $unreadCount]);
+    $counts = $pdo->query("SELECT COUNT(*) AS total_count,
+        COALESCE(SUM(CASE WHEN is_read = 0 THEN 1 ELSE 0 END), 0) AS unread_count,
+        COALESCE(SUM(CASE WHEN type = 'alert' THEN 1 ELSE 0 END), 0) AS alert_count,
+        COALESCE(SUM(CASE WHEN type = 'info' THEN 1 ELSE 0 END), 0) AS info_count
+        FROM notifications")->fetch(PDO::FETCH_ASSOC);
+    echo json_encode([
+        'unreadCount' => (int)($counts['unread_count'] ?? 0),
+        'totalCount' => (int)($counts['total_count'] ?? 0),
+        'alertCount' => (int)($counts['alert_count'] ?? 0),
+        'infoCount' => (int)($counts['info_count'] ?? 0),
+    ]);
 } catch (Throwable $e) {
     error_log('BioSync unread notification count query failed.');
     http_response_code(500);
