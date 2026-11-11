@@ -4,7 +4,7 @@ Snapshot checked 2026-10-29. Recheck before relying on branch, line-ending, or i
 
 ## Layout and ownership
 
-- Root PHP pages: `dashboard.php` (controls, stage actions, SMS, live UI), `login.php` / `logout.php` (auth), `live_data.php` (authenticated dashboard JSON), `api_update.php` (device ingest, thresholds, notifications), `historicaldatapage.php` (history, SMS, settings), `notificationspage.php` (notification actions/settings), `profile.php` (profile/password/settings), `usermanagement.php` (admin user CRUD/settings), `config.php` (PDO connection; credentials stay private).
+- Root PHP pages: `dashboard.php` (controls, stage actions, SMS, live UI), `login.php` / `logout.php` (auth), `live_data.php` (authenticated dashboard JSON), `notification_status.php` (authenticated unread notification count), `api_update.php` (device ingest, thresholds, notifications), `historicaldatapage.php` (history, SMS, settings), `notificationspage.php` (notification actions/settings), `profile.php` (profile/password/settings), `usermanagement.php` (admin user CRUD/settings), `config.php` (PDO connection; credentials stay private).
 - `biosync_db.sql`: MariaDB schema and seed data. `biosync_ml/train_models.py` trains; `prediction_api.py` serves; `ml_widget.php` calls the API. Firmware sketches are grouped by board in `firmware/uno/` and `firmware/esp12e/`; local `firmware/esp12e/secrets.h` must remain ignored. The wiring diagram is `firmware/wiring_uno_esp12e_bridge.svg`. `tests/contract_tests.py` holds cross-file checks; `tests/run_tests.sh` runs static checks and optional live smoke checks.
 - `AGENTS.md` is the contributor guide; `README.md` has setup and runtime documentation.
 

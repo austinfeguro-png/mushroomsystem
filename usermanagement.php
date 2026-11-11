@@ -181,8 +181,9 @@ $stage       = $settings['current_stage'] ?? 'colonization';
         .topbar-title{font-family:var(--font);font-size:18px;font-weight:800;}
         .topbar-sub{font-size:12px;color:var(--text-light);margin-top:1px;}
         .topbar-right{display:flex;align-items:center;gap:16px;}
-        .icon-btn{background:none;border:1px solid var(--border);color:var(--text-muted);width:36px;height:36px;border-radius:var(--radius-sm);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:15px;transition:all var(--transition);}
+        .icon-btn{background:none;border:1px solid var(--border);color:var(--text-muted);width:36px;height:36px;border-radius:var(--radius-sm);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:15px;transition:all var(--transition);position:relative;}
         .icon-btn:hover{background:var(--bg-body);color:var(--primary);border-color:var(--primary);}
+        .notif-dot{position:absolute;top:-3px;right:-3px;width:9px;height:9px;background:var(--danger);border-radius:50%;border:2px solid var(--bg-card);}
         .user-chip{display:flex;align-items:center;gap:10px;padding:4px 4px 4px 12px;border:1px solid var(--border);border-radius:100px;}
         .user-chip-name{font-size:13px;font-weight:600;}
         .user-chip-role{font-size:11px;color:var(--text-muted);}
@@ -365,7 +366,7 @@ $stage       = $settings['current_stage'] ?? 'colonization';
             </div>
             <div class="topbar-right">
                 <button id="themeBtn" class="icon-btn"><i id="themeIcon" class="fa-solid fa-moon"></i></button>
-                <a href="notificationspage.php" class="icon-btn" title="Notifications"><i class="fa-regular fa-bell"></i></a>
+                <a href="notificationspage.php" class="icon-btn" title="Notifications" aria-label="Notifications" data-notification-bell><i class="fa-regular fa-bell"></i><span class="notif-dot" hidden aria-hidden="true"></span></a>
                 <div class="user-chip">
                     <div>
                         <div class="user-chip-name"><?php echo htmlspecialchars($userName); ?></div>
@@ -691,6 +692,7 @@ document.addEventListener('keydown', function (e) {
     if (m) m.classList.remove('open');
 });
 </script>
+<script src="notification_bell.js" defer></script>
 <script src="presence.js" defer></script>
 </body>
 </html>

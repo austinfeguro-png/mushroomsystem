@@ -346,8 +346,11 @@ $hasCustomAvatar = !empty($user['avatar_url']) && avatarUrl($user['avatar_url'],
         .icon-btn { background: none; border: 1px solid var(--border); color: var(--text-muted);
                     width: 36px; height: 36px; border-radius: 8px;
                     display: flex; align-items: center; justify-content: center;
-                    cursor: pointer; font-size: 15px; transition: all .15s; }
+                    cursor: pointer; font-size: 15px; transition: all .15s; position: relative; }
         .icon-btn:hover { background: var(--bg-body); color: var(--primary); border-color: var(--primary); }
+
+        .notif-dot { position: absolute; top: -3px; right: -3px; width: 9px; height: 9px;
+            background: var(--danger); border-radius: 50%; border: 2px solid var(--card-bg); }
         .user-chip { display: flex; align-items: center; gap: 10px; padding: 4px 4px 4px 12px;
                      border: 1px solid var(--border); border-radius: 100px; }
         .user-chip-name { font-size: 13px; font-weight: 600; max-width: 160px;
@@ -498,8 +501,9 @@ $hasCustomAvatar = !empty($user['avatar_url']) && avatarUrl($user['avatar_url'],
     </div>
     <div class="topbar-right">
         <button id="themeBtn" class="icon-btn"><i id="themeIcon" class="fa-solid fa-moon"></i></button>
-        <a href="notificationspage.php" class="icon-btn" title="Notifications">
+        <a href="notificationspage.php" class="icon-btn" title="Notifications" aria-label="Notifications" data-notification-bell>
             <i class="fa-regular fa-bell"></i>
+            <span class="notif-dot" hidden aria-hidden="true"></span>
         </a>
         <div class="user-chip">
             <div>
@@ -853,6 +857,7 @@ function confirmLogout(e) {
     if (confirm('Are you sure you want to log out?')) location.href = 'logout.php';
 }
 </script>
+<script src="notification_bell.js" defer></script>
 <script src="presence.js" defer></script>
 </body>
 </html>

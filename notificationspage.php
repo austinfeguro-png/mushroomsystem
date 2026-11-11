@@ -190,7 +190,6 @@ $notifStmt         = $pdo->query("SELECT * FROM notifications ORDER BY created_a
 $notificationsRaw  = $notifStmt->fetchAll(PDO::FETCH_ASSOC);
 
 $notifications        = [];
-$unreadAlertTriggered = false;
 $totalUnread          = 0;
 
 if (empty($notificationsRaw)) {
@@ -210,7 +209,6 @@ if (empty($notificationsRaw)) {
 foreach ($notifications as $n) {
     if (!$n['is_read']) {
         $totalUnread++;
-        if ($n['type'] === 'alert') $unreadAlertTriggered = true;
     }
 }
 ?>
@@ -857,9 +855,9 @@ foreach ($notifications as $n) {
                 <button id="themeBtn" class="icon-btn" aria-label="Toggle theme">
                     <i id="themeIcon" class="fa-solid fa-moon"></i>
                 </button>
-                <a href="notificationspage.php" class="icon-btn" title="Notifications">
+                <a href="notificationspage.php" class="icon-btn" title="Notifications" aria-label="Notifications" data-notification-bell>
                     <i class="fa-regular fa-bell"></i>
-                    <?php if ($unreadAlertTriggered): ?><div class="notif-dot" id="topbarDot"></div><?php endif; ?>
+                    <span class="notif-dot" hidden aria-hidden="true"></span>
                 </a>
                 <div class="user-chip">
                     <div>
@@ -1162,11 +1160,6 @@ function recountAll() {
     document.getElementById('statUnread').textContent  = unread.length;
     document.getElementById('statAlerts').textContent  = alerts.length;
 
-    // Hide topbar dot if no unread alerts
-    const topbarDot = document.getElementById('topbarDot');
-    if (topbarDot && !all.some(i => i.dataset.type === 'alert' && i.dataset.read === '0')) {
-        topbarDot.style.display = 'none';
-    }
 }
 
 // ================================================
@@ -1410,6 +1403,7 @@ document.addEventListener('keydown', function (e) {
     if (m) m.classList.remove('open');
 });
 </script>
+<script src="notification_bell.js" defer></script>
 <script src="presence.js" defer></script>
 </body>
 </html>

@@ -1192,9 +1192,9 @@ if ($alertTriggered) {
                 <button id="themeBtn" class="icon-btn" aria-label="Toggle theme">
                     <i id="themeIcon" class="fa-solid fa-moon"></i>
                 </button>
-                <a href="notificationspage.php" class="icon-btn" title="Notifications">
+                <a href="notificationspage.php" class="icon-btn" title="Notifications" aria-label="Notifications" data-notification-bell>
                     <i class="fa-regular fa-bell"></i>
-                    <?php if ($alertTriggered): ?><div class="notif-dot"></div><?php endif; ?>
+                    <span class="notif-dot" hidden aria-hidden="true"></span>
                 </a>
                 <div class="user-chip">
                     <div>
@@ -1436,7 +1436,7 @@ if ($alertTriggered) {
                 <div class="card">
                     <div class="card-head">
                         <h3 class="card-title">User Presence</h3>
-                        <a href="usermanagement.php" class="card-link">View All</a>
+                        <?php if ($isAdmin): ?><a href="usermanagement.php" class="card-link">View All</a><?php endif; ?>
                     </div>
 
                     <div class="user-row" data-presence-user="<?php echo (int)$userId; ?>">
@@ -2221,7 +2221,6 @@ function updateLiveData() {
             // ── Alert banner ──────────────────────────────
             const banner     = document.getElementById('alertBanner');
             const bannerText = document.getElementById('alertBannerText');
-            const notifDot   = document.querySelector('.notif-dot');
             const sensorStaleBanner = document.getElementById('sensorStaleBanner');
             if (sensorStaleBanner) sensorStaleBanner.style.display = d.sensorDataFresh ? 'none' : 'flex';
             const isAbnormal = d.sensorDataFresh && (d.tempAbove || d.tempBelow || d.humAbove || d.humBelow);
@@ -2236,10 +2235,8 @@ function updateLiveData() {
                         '<div style="width:100%;"><div style="font-size:15px;margin-bottom:4px;">' +
                         '<strong>ALERT:</strong> ' + msgs.join(' & ') + '. Auto-systems started.</div></div>';
                     banner.style.display = 'flex';
-                    if (notifDot) notifDot.style.display = 'block';
                 } else {
                     banner.style.display = 'none';
-                    if (notifDot) notifDot.style.display = 'none';
                 }
             }
 
@@ -2347,6 +2344,7 @@ document.addEventListener('keydown', function (e) {
     if (m) m.classList.remove('open');
 });
 </script>
+<script src="notification_bell.js" defer></script>
 <script src="presence.js" defer></script>
 </body>
 </html>

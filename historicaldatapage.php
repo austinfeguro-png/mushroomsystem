@@ -954,9 +954,9 @@ if ($alertTriggered) {
                 <button id="themeBtn" class="icon-btn" aria-label="Toggle theme">
                     <i id="themeIcon" class="fa-solid fa-moon"></i>
                 </button>
-                <a href="notificationspage.php" class="icon-btn" title="Notifications">
+                <a href="notificationspage.php" class="icon-btn" title="Notifications" aria-label="Notifications" data-notification-bell>
                     <i class="fa-regular fa-bell"></i>
-                    <?php if ($alertTriggered): ?><div class="notif-dot"></div><?php endif; ?>
+                    <span class="notif-dot" hidden aria-hidden="true"></span>
                 </a>
                 <div class="user-chip">
                     <div>
@@ -1577,6 +1577,7 @@ document.addEventListener('keydown', function (e) {
     if (m) m.classList.remove('open');
 });
 </script>
+<script src="notification_bell.js" defer></script>
 <script src="presence.js" defer></script>
 </body>
 </html>
