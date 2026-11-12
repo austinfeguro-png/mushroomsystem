@@ -1,28 +1,28 @@
 {
-  "best_model": "Random Forest",
+  "best_model": "Decision Tree",
   "results": {
     "Decision Tree": {
-      "accuracy": 93.33,
-      "precision": 94.04,
-      "recall": 93.33
+      "accuracy": 97.67,
+      "precision": 97.75,
+      "recall": 97.67
     },
     "Random Forest": {
-      "accuracy": 96.67,
-      "precision": 97.22,
-      "recall": 96.67
+      "accuracy": 97.67,
+      "precision": 97.75,
+      "recall": 97.67
     },
     "KNN": {
-      "accuracy": 86.67,
-      "precision": 83.91,
-      "recall": 86.67
+      "accuracy": 88.37,
+      "precision": 88.02,
+      "recall": 88.37
     }
   },
   "imbalanced": true,
   "class_balance": {
-    "Critical": 103,
-    "Normal": 23,
-    "Warning": 20
+    "Critical": 144,
+    "Normal": 41,
+    "Warning": 26
   },
-  "total_samples": 146,
+  "total_samples": 211,
   "evaluation_note": "Condition labels are generated from the stage thresholds encoded in the trainer. Scores measure reproduction of those rules, not independent biological validation."
 }
