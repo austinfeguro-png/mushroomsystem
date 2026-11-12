@@ -46,7 +46,7 @@ flowchart TB
     API -->|"CMD:FAN=n,PUMP=n + stage thresholds"| ESP
 
     DB -.-> CFG
-    DASH -->|"poll every 5s"| LIVE
+    DASH -->|"poll every 3s"| LIVE
     LIVE --> DB
     DASH -->|"stage switch, Extend/Advance,<br/>settings"| DB
     DASH -->|"includes"| MLW
@@ -115,7 +115,7 @@ sequenceDiagram
     UNO->>ESP: STATE:FAN=n,PUMP=n
 ```
 
-## 3. Sequence Diagram — Dashboard Poll + ML Prediction (every 5 s)
+## 3. Sequence Diagram — Dashboard Poll + ML Prediction (every 3 s)
 
 ```mermaid
 sequenceDiagram
@@ -130,7 +130,7 @@ sequenceDiagram
     DASH->>DB: settings, stage, chart data, notifications
     DASH-->>U: rendered page (incl. ML widget)
 
-    loop every 5 seconds
+    loop every 3 seconds
         U->>LIVE: fetch live_data.php
         LIVE->>DB: settings + devices + sensor_logs + notifications
         DB-->>LIVE: rows

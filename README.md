@@ -4,7 +4,7 @@ Bio-Sync is an IoT system that monitors temperature and humidity in a growing en
 
 ## ✨ Features
 
-- **Live monitoring** — local temperature/humidity checks and control every 3 seconds; sensor history is saved every 10 minutes, with the dashboard refreshing every 5 seconds
+- **Live monitoring** — local temperature/humidity checks and control every 3 seconds; sensor history is saved every 10 minutes, with the dashboard refreshing every 3 seconds
 - **Automatic control** — fan and pump switch on/off based on configurable thresholds (with hardware-side overrides)
 - **User management** — admin/user roles, bcrypt-hashed passwords, account activation/deactivation
 - **Notifications center** — in-app alerts with read/unread state
@@ -36,7 +36,7 @@ Three components work together:
 
 ```
 ├── api_update.php            # Hardware ingest endpoint (Arduino → server)
-├── live_data.php             # JSON feed polled by the dashboard every 5 s
+├── live_data.php             # JSON feed polled by the dashboard every 3 s
 ├── dashboard.php             # Main dashboard + AJAX handlers
 ├── login.php                 # Authentication
 ├── profile.php               # User profile management
@@ -160,8 +160,8 @@ you close that PowerShell window.
 Upload `firmware/uno/uno.ino` to the **Uno** and
 `firmware/esp12e/esp12e.ino` to the **ESP-12E** (use the
 NodeMCU 1.0 ESP-12E board profile). The Uno reads
-DHT22 on D2, drives active-LOW fan/pump relays on D4/D5, and LEDs on D8/D9.
-Uno D10 RX connects to NodeMCU D7 TX; Uno D11 TX connects through a 1k/2k
+DHT22 on D3, drives active-LOW fan/pump relays on D4/D5, and LEDs on D8/D9.
+Uno D12 RX connects to NodeMCU D7 TX; Uno D11 TX connects through a 1k/2k
 voltage divider to NodeMCU D6 RX. Share ground. The serial link is 9600 baud;
 both USB Serial Monitors use 115200 baud.
 

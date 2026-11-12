@@ -1244,14 +1244,18 @@ if ($alertTriggered) {
                     <?php echo htmlspecialchars($stageLabel); ?> has reached
                     <?php echo $daysPassed; ?> days. Please inspect the substrate bags.
                 </div>
-                <button onclick="openExtendModal()" class="btn btn-ghost"
-                    style="font-size:12px;padding:6px 12px;margin-right:6px;">
-                    <i class="fa-solid fa-clock"></i> Not Yet — Extend
-                </button>
-                <button onclick="openAdvanceModal()" class="btn btn-primary"
-                    style="font-size:12px;padding:6px 12px;">
-                    <i class="fa-solid fa-circle-check"></i> Confirm & Advance
-                </button>
+                <?php if ($isAdmin): ?>
+                    <button onclick="openExtendModal()" class="btn btn-ghost"
+                        style="font-size:12px;padding:6px 12px;margin-right:6px;">
+                        <i class="fa-solid fa-clock"></i> Not Yet — Extend
+                    </button>
+                    <button onclick="openAdvanceModal()" class="btn btn-primary"
+                        style="font-size:12px;padding:6px 12px;">
+                        <i class="fa-solid fa-circle-check"></i> Confirm & Advance
+                    </button>
+                <?php else: ?>
+                    <span class="text-muted" style="font-size:12px;">An admin must confirm the stage inspection.</span>
+                <?php endif; ?>
             </div>
             <?php endif; ?>
 
