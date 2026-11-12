@@ -106,6 +106,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax_action'])) {
             $stageLabel    = $stageLabelMap[$newStage] ?? ucfirst($newStage);
             $defaultDays   = $defaultDaysMap[$newStage] ?? 14;
 
+            $timingStmt = $pdo->query("SELECT setting_key, setting_value FROM system_settings
+                WHERE setting_key IN ('stage_started_at', 'stage_expected_days')");
+            $currentTiming = $timingStmt->fetchAll(PDO::FETCH_KEY_PAIR);
+            $currentStart = strtotime($currentTiming['stage_started_at'] ?? '');
+            $currentExpectedDays = (int)($currentTiming['stage_expected_days'] ?? ($defaultDaysMap[$curStage] ?? 14));
+            if ($currentExpectedDays <= 0) $currentExpectedDays = $defaultDaysMap[$curStage] ?? 14;
+            $currentDaysPassed = $currentStart !== false
+                ? max(0, (int)floor((time() - $currentStart) / 86400))
+                : 0;
+            $isEarlyTransition = $currentExpectedDays > 0
+                && ($currentStart === false || $currentDaysPassed < $currentExpectedDays);
+
             $stmt->execute(['key' => 'stage_started_at',   'val' => date('Y-m-d H:i:s'), 'user_id' => $userId]);
             $stmt->execute(['key' => 'stage_expected_days','val' => $defaultDays, 'user_id' => $userId]);
 
@@ -124,8 +136,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax_action'])) {
                 VALUES (:user_id, :title, :desc, :msg, 'info', 'fa-seedling', 0, NOW())")
             ->execute([
                 'user_id' => $userId,
-                'title' => 'Stage Advanced',
-                'desc'  => "{$userName} confirmed stage transition to {$stageLabel}. New thresholds: {$thresh}.",
+                'title' => $isEarlyTransition ? 'Stage Advanced Early' : 'Stage Advanced',
+                'desc'  => $isEarlyTransition
+                    ? "{$userName} advanced to {$stageLabel} early on day {$currentDaysPassed} of {$currentExpectedDays} after inspection. New thresholds: {$thresh}."
+                    : "{$userName} confirmed stage transition to {$stageLabel}. New thresholds: {$thresh}.",
                 'msg'   => "System has advanced to {$stageLabel} stage.",
             ]);
         }
@@ -1267,6 +1281,12 @@ if ($alertTriggered) {
                         style="font-size:12px;min-height:44px;padding:6px 10px;margin-top:6px;">
                         Adjust day
                     </button>
+                    <?php if (!$pendingReminder && $expectedDays > 0 && $daysPassed < $expectedDays && $stage !== 'fruiting'): ?>
+                    <button type="button" class="btn btn-primary" onclick="openAdvanceModal(true)"
+                        style="display:block;font-size:12px;min-height:44px;padding:6px 10px;margin-top:6px;">
+                        <i class="fa-solid fa-forward-step" aria-hidden="true"></i> Advance Early
+                    </button>
+                    <?php endif; ?>
                     <?php endif; ?>
                 </div>
             </div>
@@ -1618,7 +1638,7 @@ if ($alertTriggered) {
             <button class="modal-close" onclick="closeAdvanceModal()"><i class="fa-solid fa-xmark"></i></button>
         </div>
         <div class="modal-body">
-            <p style="font-size:14px;color:var(--text-muted);margin-bottom:16px;">
+            <p id="advanceModalIntro" style="font-size:14px;color:var(--text-muted);margin-bottom:16px;">
                 You are confirming that the substrate bags have been physically inspected and are ready to advance.
             </p>
             <div style="background:var(--bg-body);border-radius:8px;padding:14px 16px;font-size:13px;">
@@ -1632,14 +1652,14 @@ if ($alertTriggered) {
                 </div>
             </div>
             <input type="hidden" id="advanceNextKey">
-            <div style="font-size:12px;color:var(--text-muted);margin-top:12px;">
+            <div id="advanceModalTimingNote" style="font-size:12px;color:var(--text-muted);margin-top:12px;">
                 Thresholds will update immediately upon confirmation. This action is logged.
             </div>
         </div>
         <div class="modal-foot">
             <button class="btn btn-ghost" onclick="closeAdvanceModal()">Cancel</button>
             <button class="btn btn-primary" id="confirmAdvanceBtn" onclick="confirmAdvance()">
-                <i class="fa-solid fa-circle-check"></i> Confirm & Advance
+                <i class="fa-solid fa-circle-check"></i> <span id="confirmAdvanceLabel">Confirm &amp; Advance</span>
             </button>
         </div>
     </div>
@@ -2056,39 +2076,54 @@ const stageNames = {
     'fruiting'    : '🍄 Fruiting'
 };
 const currentStageKey = '<?php echo $stage; ?>';
+let earlyAdvanceRequested = false;
 
-function openAdvanceModal() {
+function openAdvanceModal(isEarly = false) {
     const currentIdx = stageOrder.indexOf(currentStageKey);
     const nextKey    = stageOrder[currentIdx + 1];
     if (!nextKey) {
         alert('You are already at the final stage (Fruiting). The current cycle is complete.');
         return;
     }
+    earlyAdvanceRequested = isEarly;
     document.getElementById('advanceFromName').textContent = stageNames[currentStageKey] || currentStageKey;
     document.getElementById('advanceToName').textContent   = stageNames[nextKey] || nextKey;
     document.getElementById('advanceNextKey').value        = nextKey;
+    document.getElementById('advanceModalIntro').textContent = isEarly
+        ? 'The expected duration has not elapsed (day <?php echo (int)$daysPassed; ?> of <?php echo (int)$expectedDays; ?>). Advance only if you have inspected the substrate bags and confirmed they are ready.'
+        : 'The substrate bags should be physically inspected and confirmed ready before advancing.';
+    document.getElementById('advanceModalTimingNote').textContent = isEarly
+        ? 'Confirming will reset the stage timer and apply the next stage thresholds immediately. This early transition will be logged.'
+        : 'The next stage timer and thresholds will update immediately upon confirmation. This action is logged.';
+    document.getElementById('confirmAdvanceLabel').textContent = isEarly ? 'Advance Early' : 'Confirm & Advance';
     document.getElementById('advanceModal').classList.add('open');
 }
 function closeAdvanceModal() {
     document.getElementById('advanceModal').classList.remove('open');
+    earlyAdvanceRequested = false;
 }
 function confirmAdvance() {
     const nextKey = document.getElementById('advanceNextKey').value;
     const btn     = document.getElementById('confirmAdvanceBtn');
-    btn.textContent = 'Advancing...'; btn.disabled = true;
+    const confirmLabel = document.getElementById('confirmAdvanceLabel');
+    confirmLabel.textContent = 'Advancing...'; btn.disabled = true;
 
     // Use save_settings to switch stage
     post({
         ajax_action:  'save_settings',
         temp_unit:    document.getElementById('tempUnit') ? document.getElementById('tempUnit').value : 'C',
-        email_notif:  '1',
+        email_notif:  '<?php echo addslashes($EMAIL_NOTIF); ?>',
         growth_stage: nextKey,
         ml_algorithm: '<?php echo addslashes($activeAlgo); ?>',
     }).then(d => {
-        btn.textContent = 'Confirm'; btn.disabled = false;
+        if (!d.success) throw new Error(d.error || 'Stage transition was not saved.');
+        btn.disabled = false;
         closeAdvanceModal();
         if (d.stageChanged) location.reload();
-    }).catch(() => { btn.textContent = 'Confirm'; btn.disabled = false; });
+    }).catch(() => {
+        confirmLabel.textContent = earlyAdvanceRequested ? 'Advance Early' : 'Confirm & Advance';
+        btn.disabled = false;
+    });
 }
 
 // ================================================
