@@ -260,19 +260,51 @@ $isAbnormal = ($temperature > $MAX_TEMP)
            || ($humidity < $MIN_HUM)
            || ($humidity > $MAX_HUM);
 
-if ($isAbnormal) {
-    try {
-        $lastStmt  = $pdo->query("
-            SELECT created_at FROM notifications
-            WHERE type = 'alert'
-            ORDER BY created_at DESC LIMIT 1
-        ");
-        $lastRow   = $lastStmt->fetch();
-        $lastTime  = $lastRow ? strtotime($lastRow['created_at']) : 0;
-        $cooldown  = 300; // 5 minutes
-        $canNotify = (time() - $lastTime) >= $cooldown;
+$alertStateRaw = (string)($settings['environment_alert_state'] ?? '');
+$alertState = json_decode($alertStateRaw, true);
+if (!is_array($alertState)) $alertState = [];
+$previousAlertStage = is_string($alertState['stage'] ?? null) ? $alertState['stage'] : '';
+$previousAlertCodes = is_array($alertState['codes'] ?? null) ? $alertState['codes'] : [];
+$normalReadingsAfterAlert = max(0, (int)($alertState['normal_readings'] ?? 0));
 
-        if ($canNotify) {
+$currentAlertCodes = [];
+if ($temperature > $MAX_TEMP) $currentAlertCodes[] = 't+';
+if ($temperature < $MIN_TEMP) $currentAlertCodes[] = 't-';
+if ($humidity < $MIN_HUM) $currentAlertCodes[] = 'h-';
+if ($humidity > $MAX_HUM) $currentAlertCodes[] = 'h+';
+
+// A sustained alert is recorded once. A new sensor breach or stage change
+// creates an update; three consecutive normal uploads close the active episode.
+$newAlertCodes = array_diff($currentAlertCodes, $previousAlertCodes);
+$shouldCreateAlert = $isAbnormal && (
+    $previousAlertStage !== $stage || count($newAlertCodes) > 0
+);
+
+if ($isAbnormal) {
+    $nextAlertState = [
+        'stage' => $stage,
+        'codes' => $currentAlertCodes,
+        'normal_readings' => 0,
+    ];
+} else {
+    $normalReadingsAfterAlert++;
+    if (count($previousAlertCodes) === 0 || $normalReadingsAfterAlert >= 3) {
+        $previousAlertCodes = [];
+        $normalReadingsAfterAlert = 0;
+    }
+    $nextAlertState = [
+        'stage' => $stage,
+        'codes' => $previousAlertCodes,
+        'normal_readings' => $normalReadingsAfterAlert,
+    ];
+}
+$nextAlertStateRaw = json_encode($nextAlertState, JSON_UNESCAPED_SLASHES);
+
+if ($shouldCreateAlert || $nextAlertStateRaw !== $alertStateRaw) {
+    try {
+        $pdo->beginTransaction();
+
+        if ($shouldCreateAlert) {
             $conditions = [];
 
             // FIX (Bug 5): Both high and low temp now generate messages
@@ -325,7 +357,14 @@ if ($isAbnormal) {
                 'icon'  => $iconClass,
             ]);
         }
-    } catch (PDOException $e) {
+
+        $pdo->prepare("INSERT INTO system_settings (setting_key, setting_value)
+            VALUES ('environment_alert_state', :state)
+            ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)")
+            ->execute(['state' => $nextAlertStateRaw]);
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
         error_log("BioSync notification error: " . $e->getMessage());
     }
 }
