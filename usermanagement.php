@@ -10,6 +10,7 @@ require_once 'config.php';
 $pdo = getDB();
 require_once 'auth_guard.php';
 requireCurrentActiveUser($pdo);
+require_once 'stage_transition.php';
 if (!isset($_SESSION['user_role']) || strtolower($_SESSION['user_role']) !== 'admin') { header("Location: dashboard.php"); exit(); }
 $userName = $_SESSION['user_name'];
 
@@ -71,6 +72,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax_action'])) {
 
         // Load current stage to detect if it changed
         $curStage = $pdo->query("SELECT setting_value FROM system_settings WHERE setting_key='current_stage'")->fetchColumn();
+        if ($curStage !== $newStage && ($_POST['stage_transition_confirmed'] ?? '') !== '1') {
+            http_response_code(409);
+            echo json_encode(['success' => false, 'error' => 'Confirm the stage transition before saving.']);
+            exit();
+        }
 
         $stmt = $pdo->prepare("INSERT INTO system_settings (setting_key, setting_value, updated_by_user_id)
             VALUES (:key, :val, :user_id)
@@ -78,35 +84,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax_action'])) {
         $stmt->execute(['key' => 'temperature_unit',    'val' => $tempUnit, 'user_id' => $_SESSION['user_id']]);
         $stmt->execute(['key' => 'email_notifications', 'val' => $emailNotif, 'user_id' => $_SESSION['user_id']]);
         $stmt->execute(['key' => 'active_ml_algorithm', 'val' => $newAlgo, 'user_id' => $_SESSION['user_id']]);
-        $stmt->execute(['key' => 'current_stage',       'val' => $newStage, 'user_id' => $_SESSION['user_id']]);
+        if ($curStage !== $newStage) {
+            $stmt->execute(['key' => 'current_stage', 'val' => $newStage, 'user_id' => $_SESSION['user_id']]);
+        }
 
         // If stage changed, reset timer and log notification (same as dashboard.php)
         if ($curStage !== $newStage) {
-            $stageLabelMap  = ['colonization'=>'Colonization','pinning'=>'Pinning Initiation','fruiting'=>'Fruiting'];
-            $defaultDaysMap = ['colonization'=>14,'pinning'=>7,'fruiting'=>5];
-            $stageLabel     = $stageLabelMap[$newStage] ?? ucfirst($newStage);
-            $defaultDays    = $defaultDaysMap[$newStage] ?? 14;
-
-            $stmt->execute(['key' => 'stage_started_at',   'val' => date('Y-m-d H:i:s'), 'user_id' => $_SESSION['user_id']]);
-            $stmt->execute(['key' => 'stage_expected_days','val' => $defaultDays, 'user_id' => $_SESSION['user_id']]);
-
-            $pdo->exec("UPDATE notifications SET is_read = 1 WHERE type = 'stage_reminder'");
-
-            $userName = $_SESSION['user_name'] ?? 'Admin';
-            $stageThresholds = [
-                'colonization' => '24–28°C | 70–85% RH',
-                'pinning'      => '18–24°C | 85–95% RH',
-                'fruiting'     => '24–28°C | 80–95% RH',
-            ];
-            $thresh = $stageThresholds[$newStage] ?? '';
-            $pdo->prepare("INSERT INTO notifications (action_by_user_id, title, description, message, type, icon_class, is_read, created_at)
-                VALUES (:user_id, :title, :desc, :msg, 'info', 'fa-seedling', 0, NOW())")
-            ->execute([
-                'user_id' => $_SESSION['user_id'],
-                'title' => 'Stage Advanced',
-                'desc'  => "{$userName} confirmed stage transition to {$stageLabel}. New thresholds: {$thresh}.",
-                'msg'   => "System has advanced to {$stageLabel} stage.",
-            ]);
+            biosync_record_stage_transition($pdo, (string)$curStage, $newStage, (int)$_SESSION['user_id'], $_SESSION['user_name'] ?? 'Admin');
         }
 
         echo json_encode(['success' => true, 'stageChanged' => ($curStage !== $newStage), 'newStage' => $newStage]);
@@ -505,7 +489,7 @@ $stage       = $settings['current_stage'] ?? 'colonization';
                 <div class="setting-section-title">Cultivation Stage</div>
                 <div class="setting-row">
                     <span>Active Growth Stage</span>
-                    <select id="growthStage" class="field-sm">
+                    <select id="growthStage" class="field-sm" data-current-stage="<?php echo htmlspecialchars($stage, ENT_QUOTES, 'UTF-8'); ?>">
                         <option value="colonization" <?php echo $stage==='colonization'?'selected':''; ?>>
                             🌱 Colonization (24–28°C | 70–85%)
                         </option>
@@ -653,6 +637,8 @@ document.getElementById('settingsLink').addEventListener('click', e => { e.preve
 document.getElementById('closeSettings').addEventListener('click', closeSettingsModal);
 
 document.getElementById('saveSettings').addEventListener('click', () => {
+    const stageSelect = document.getElementById('growthStage');
+    if (!window.confirmStageTransition(stageSelect.dataset.currentStage, stageSelect.value)) return;
     applyTheme(modalTheme.checked);
     const btn = document.getElementById('saveSettings');
     btn.textContent = 'Saving...'; btn.disabled = true;
@@ -662,10 +648,12 @@ document.getElementById('saveSettings').addEventListener('click', () => {
     fd.append('temp_unit', document.getElementById('tempUnit').value);
     fd.append('email_notif', document.getElementById('emailNotif').checked ? '1' : '0');
     fd.append('growth_stage', document.getElementById('growthStage').value);
+    fd.append('stage_transition_confirmed', '1');
     fd.append('ml_algorithm', document.getElementById('mlAlgorithm').value);
     fetch('usermanagement.php', { method:'POST', body:fd })
         .then(r => r.json())
         .then(d => {
+            if (!d.success) throw new Error(d.error || 'Could not save settings.');
             btn.textContent = 'Saved!'; btn.style.background = '#15803d';
             setTimeout(() => { btn.textContent = 'Save Changes'; btn.style.background = ''; btn.disabled = false; closeSettingsModal(); location.reload(); }, 900);
         })
@@ -692,6 +680,7 @@ document.addEventListener('keydown', function (e) {
     if (m) m.classList.remove('open');
 });
 </script>
+<script src="stage_transition_confirmation.js"></script>
 <script src="notification_bell.js" defer></script>
 <script src="presence.js" defer></script>
 </body>

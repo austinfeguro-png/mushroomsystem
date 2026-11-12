@@ -18,6 +18,7 @@ require_once 'config.php';
 $pdo = getDB();
 require_once 'auth_guard.php';
 requireCurrentActiveUser($pdo);
+require_once 'stage_transition.php';
 $userName = $_SESSION['user_name'];
 $userId   = $_SESSION['user_id'];
 $isAdmin  = isset($_SESSION['user_role']) && strtolower($_SESSION['user_role']) === 'admin';
@@ -90,6 +91,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax_action'])) {
         // Load current stage to detect if it changed
         $curStageStmt = $pdo->query("SELECT setting_value FROM system_settings WHERE setting_key='current_stage'");
         $curStage     = $curStageStmt->fetchColumn();
+        if ($curStage !== $newStage && ($_POST['stage_transition_confirmed'] ?? '') !== '1') {
+            http_response_code(409);
+            echo json_encode(['success' => false, 'error' => 'Confirm the stage transition before saving.']);
+            exit();
+        }
 
         $stmt = $pdo->prepare("INSERT INTO system_settings (setting_key, setting_value, updated_by_user_id)
             VALUES (:key, :val, :user_id)
@@ -97,51 +103,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax_action'])) {
         $stmt->execute(['key' => 'temperature_unit',    'val' => $tempUnit, 'user_id' => $userId]);
         $stmt->execute(['key' => 'email_notifications', 'val' => $emailNotif, 'user_id' => $userId]);
         $stmt->execute(['key' => 'active_ml_algorithm', 'val' => $newAlgo, 'user_id' => $userId]);
-        $stmt->execute(['key' => 'current_stage',       'val' => $newStage, 'user_id' => $userId]);
+        if ($curStage !== $newStage) {
+            $stmt->execute(['key' => 'current_stage', 'val' => $newStage, 'user_id' => $userId]);
+        }
 
         // If stage changed, reset timer and log notification
         if ($curStage !== $newStage) {
-            $stageLabelMap = ['colonization'=>'Colonization','pinning'=>'Pinning Initiation','fruiting'=>'Fruiting'];
-            $defaultDaysMap= ['colonization'=>14,'pinning'=>7,'fruiting'=>5];
-            $stageLabel    = $stageLabelMap[$newStage] ?? ucfirst($newStage);
-            $defaultDays   = $defaultDaysMap[$newStage] ?? 14;
-
-            $timingStmt = $pdo->query("SELECT setting_key, setting_value FROM system_settings
-                WHERE setting_key IN ('stage_started_at', 'stage_expected_days')");
-            $currentTiming = $timingStmt->fetchAll(PDO::FETCH_KEY_PAIR);
-            $currentStart = strtotime($currentTiming['stage_started_at'] ?? '');
-            $currentExpectedDays = (int)($currentTiming['stage_expected_days'] ?? ($defaultDaysMap[$curStage] ?? 14));
-            if ($currentExpectedDays <= 0) $currentExpectedDays = $defaultDaysMap[$curStage] ?? 14;
-            $currentDaysPassed = $currentStart !== false
-                ? max(0, (int)floor((time() - $currentStart) / 86400))
-                : 0;
-            $isEarlyTransition = $currentExpectedDays > 0
-                && ($currentStart === false || $currentDaysPassed < $currentExpectedDays);
-
-            $stmt->execute(['key' => 'stage_started_at',   'val' => date('Y-m-d H:i:s'), 'user_id' => $userId]);
-            $stmt->execute(['key' => 'stage_expected_days','val' => $defaultDays, 'user_id' => $userId]);
-
-            // Resolve the previous reminder but retain it in notification history.
-            $pdo->exec("UPDATE notifications SET is_read = 1 WHERE type = 'stage_reminder'");
-
-            // Log transition notification
-            $userName = $_SESSION['user_name'] ?? 'Admin';
-            $stageThresholds = [
-                'colonization' => '24–28°C | 70–85% RH',
-                'pinning'      => '18–24°C | 85–95% RH',
-                'fruiting'     => '24–28°C | 80–95% RH',
-            ];
-            $thresh = $stageThresholds[$newStage] ?? '';
-            $pdo->prepare("INSERT INTO notifications (action_by_user_id, title, description, message, type, icon_class, is_read, created_at)
-                VALUES (:user_id, :title, :desc, :msg, 'info', 'fa-seedling', 0, NOW())")
-            ->execute([
-                'user_id' => $userId,
-                'title' => $isEarlyTransition ? 'Stage Advanced Early' : 'Stage Advanced',
-                'desc'  => $isEarlyTransition
-                    ? "{$userName} advanced to {$stageLabel} early on day {$currentDaysPassed} of {$currentExpectedDays} after inspection. New thresholds: {$thresh}."
-                    : "{$userName} confirmed stage transition to {$stageLabel}. New thresholds: {$thresh}.",
-                'msg'   => "System has advanced to {$stageLabel} stage.",
-            ]);
+            biosync_record_stage_transition($pdo, (string)$curStage, $newStage, (int)$userId, $userName);
         }
 
         echo json_encode(['success' => true, 'stageChanged' => ($curStage !== $newStage), 'newStage' => $newStage]);
@@ -1519,7 +1487,7 @@ if ($alertTriggered) {
                 <div class="setting-section-title">Cultivation Stage</div>
                 <div class="setting-row">
                     <span>Active Growth Stage</span>
-                    <select id="growthStage" class="field">
+                    <select id="growthStage" class="field" data-current-stage="<?php echo htmlspecialchars($stage, ENT_QUOTES, 'UTF-8'); ?>">
                         <option value="colonization" <?php echo $stage==='colonization'?'selected':''; ?>>
                             🌱 Colonization (24–28°C | 70–85%)
                         </option>
@@ -1900,6 +1868,8 @@ document.getElementById('closeSettings').addEventListener('click', closeModal);
 document.getElementById('settingsModal').addEventListener('click', e => { if (e.target === e.currentTarget) closeModal(); });
 
 document.getElementById('saveSettings').addEventListener('click', () => {
+    const stageSelect = document.getElementById('growthStage');
+    if (!window.confirmStageTransition(stageSelect.dataset.currentStage, stageSelect.value)) return;
     applyTheme(modalTheme.checked);
     pendingSettings = true;
     const btn = document.getElementById('saveSettings');
@@ -1912,6 +1882,7 @@ document.getElementById('saveSettings').addEventListener('click', () => {
     fd.append('temp_unit',    document.getElementById('tempUnit').value);
     fd.append('email_notif',  document.getElementById('emailNotif').checked ? '1' : '0');
     fd.append('growth_stage', document.getElementById('growthStage').value);
+    fd.append('stage_transition_confirmed', '1');
     fd.append('ml_algorithm', document.getElementById('mlAlgorithm').value);
 
     fetch('dashboard.php', { method: 'POST', body: fd })
@@ -2118,6 +2089,7 @@ function confirmAdvance() {
         temp_unit:    document.getElementById('tempUnit') ? document.getElementById('tempUnit').value : 'C',
         email_notif:  '<?php echo addslashes($EMAIL_NOTIF); ?>',
         growth_stage: nextKey,
+        stage_transition_confirmed: '1',
         ml_algorithm: '<?php echo addslashes($activeAlgo); ?>',
     }).then(d => {
         if (!d.success) throw new Error(d.error || 'Stage transition was not saved.');
@@ -2383,6 +2355,7 @@ document.addEventListener('keydown', function (e) {
     if (m) m.classList.remove('open');
 });
 </script>
+<script src="stage_transition_confirmation.js"></script>
 <script src="notification_bell.js" defer></script>
 <script src="presence.js" defer></script>
 </body>
